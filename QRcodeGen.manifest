@@ -1,0 +1,12 @@
+{
+    "autodeskProduct": "Fusion",
+    "type": "addin",
+    "id": "f7a3b2c1-4d5e-6f78-9a0b-c1d2e3f4a5b6",
+    "author": "",
+    "description": {
+        "": "Generate QR codes as extruded 3D bodies with per-module color support for multi-color 3D printing. Supports Simple, vCard, WiFi, and Sequence modes."
+    },
+    "version": "1.0.0",
+    "runOnStartup": true,
+    "supportedOS": "windows|mac"
+}
