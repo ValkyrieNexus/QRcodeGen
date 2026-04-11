@@ -212,6 +212,15 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
             _add_hidden(sc.addTextBoxCommandInput(
                 'svg_path_display', 'Logo File', '<i>No file selected</i>', 1, True))
 
+            # Logo rotation (only visible when icon is selected)
+            logo_rot = sc.addDropDownCommandInput(
+                'logo_rotation', 'Logo Rotation', adsk.core.DropDownStyles.TextListDropDownStyle)
+            logo_rot.listItems.add('0°', True)
+            logo_rot.listItems.add('90° CCW', False)
+            logo_rot.listItems.add('180°', False)
+            logo_rot.listItems.add('270° CCW', False)
+            _add_hidden(logo_rot)
+
             ec_dd = sc.addDropDownCommandInput(
                 'error_correction', 'Error Correction', adsk.core.DropDownStyles.TextListDropDownStyle)
             for level in config.EC_LEVELS:
@@ -281,7 +290,9 @@ def _update_visibility(inputs):
     icon_inp = _find_input(inputs, 'icon_select')
     if icon_inp and icon_inp.selectedItem:
         is_svg = icon_inp.selectedItem.name == 'Custom SVG...'
+        has_icon = icon_inp.selectedItem.name != 'No Icon'
         _set_visible(inputs, 'svg_path_display', is_svg)
+        _set_visible(inputs, 'logo_rotation', has_icon)
 
         # Force error correction to H when any icon is selected
         if icon_inp.selectedItem.name != 'No Icon':
@@ -608,6 +619,18 @@ class ExecuteHandler(adsk.core.CommandEventHandler):
 
                 module_positions = qr_logic.compute_rectangles(matrix, dark=True)
 
+                # ── Get logo rotation angle ──
+                logo_rot_inp = _find_input(inputs, 'logo_rotation')
+                logo_rot_deg = 0
+                if logo_rot_inp and logo_rot_inp.selectedItem:
+                    rot_name = logo_rot_inp.selectedItem.name
+                    if '90' in rot_name:
+                        logo_rot_deg = 90
+                    elif '180' in rot_name:
+                        logo_rot_deg = 180
+                    elif '270' in rot_name:
+                        logo_rot_deg = 270
+
                 # ── Build icon callback if needed ──
                 icon_sketch_fn = None
                 if icon_name != 'No Icon' and icon_zone:
@@ -616,7 +639,9 @@ class ExecuteHandler(adsk.core.CommandEventHandler):
 
                     if icon_name == 'Custom SVG...' and _selected_svg_path:
                         svg_path = _selected_svg_path
-                        def icon_sketch_fn(sketch, cx=None, cy=None, _ctr=center_cm, _zone=zone_cm, _path=svg_path):
+                        rot_deg = logo_rot_deg
+                        def icon_sketch_fn(sketch, cx=None, cy=None, _ctr=center_cm, _zone=zone_cm, _path=svg_path, _rot=rot_deg):
+                            import math
                             ctr_x = cx if cx is not None else _ctr
                             ctr_y = cy if cy is not None else _ctr
                             # Two-pass SVG: measure at scale 1, then import scaled and centered
@@ -633,22 +658,23 @@ class ExecuteHandler(adsk.core.CommandEventHandler):
                                 yo = ctr_y - sh * sc / 2.0 - bb.minPoint.y * sc
                                 sketch.importSVG(_path, xo, yo, sc)
 
-                                # Rotate 90° CCW around center for Place on Face mode
-                                if cx is not None:
-                                    import math
-                                    # Move each sketch point: rotate (x,y) around (ctr_x, ctr_y) by 90° CCW
-                                    # Formula: x' = cx - (y - cy), y' = cy + (x - cx)
-                                    for pi in range(sketch.sketchPoints.count):
-                                        pt = sketch.sketchPoints.item(pi)
-                                        if pt.isFixed:
-                                            continue
+                                # Apply rotation if needed
+                                if _rot != 0:
+                                    angle_rad = math.radians(_rot)
+                                    center_pt = adsk.core.Point3D.create(ctr_x, ctr_y, 0)
+                                    rot_matrix = adsk.core.Matrix3D.create()
+                                    rot_matrix.setToRotation(
+                                        angle_rad,
+                                        adsk.core.Vector3D.create(0, 0, 1),
+                                        center_pt
+                                    )
+                                    # Collect ALL entities (curves + points) and move them
+                                    entities = adsk.core.ObjectCollection.create()
+                                    for ci in range(sketch.sketchCurves.count):
+                                        entities.add(sketch.sketchCurves.item(ci))
+                                    if entities.count > 0:
                                         try:
-                                            old_x = pt.geometry.x
-                                            old_y = pt.geometry.y
-                                            new_x = ctr_x - (old_y - ctr_y)
-                                            new_y = ctr_y + (old_x - ctr_x)
-                                            pt.move(adsk.core.Vector3D.create(
-                                                new_x - old_x, new_y - old_y, 0))
+                                            sketch.move(entities, rot_matrix)
                                         except Exception:
                                             pass
                     else:
