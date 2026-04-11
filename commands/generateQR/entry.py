@@ -632,6 +632,22 @@ class ExecuteHandler(adsk.core.CommandEventHandler):
                                 xo = ctr_x - sw * sc / 2.0 - bb.minPoint.x * sc
                                 yo = ctr_y - sh * sc / 2.0 - bb.minPoint.y * sc
                                 sketch.importSVG(_path, xo, yo, sc)
+
+                                # Rotate 180° around center if in Place on Face mode
+                                if cx is not None:
+                                    import math
+                                    curves = adsk.core.ObjectCollection.create()
+                                    for ci in range(sketch.sketchCurves.count):
+                                        curves.add(sketch.sketchCurves.item(ci))
+                                    if curves.count > 0:
+                                        center_pt = adsk.core.Point3D.create(ctr_x, ctr_y, 0)
+                                        rot = adsk.core.Matrix3D.create()
+                                        rot.setToRotation(
+                                            math.pi / 2,  # 90 degrees
+                                            adsk.core.Vector3D.create(0, 0, 1),  # Z axis
+                                            center_pt
+                                        )
+                                        sketch.move(curves, rot)
                     else:
                         def icon_sketch_fn(sketch, cx=None, cy=None, _name=icon_name, _ctr=center_cm, _zone=zone_cm):
                             ctr_x = cx if cx is not None else _ctr
