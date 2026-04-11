@@ -57,7 +57,8 @@ def draw_circle_module(sketch, col, row, total_rows, module_size_cm, spacing_cm=
 
 
 def draw_all_modules(sketch, module_positions, total_rows, module_size_cm,
-                     spacing_cm=0.0, style='Square', offset_x=0, offset_y=0):
+                     spacing_cm=0.0, style='Square', offset_x=0, offset_y=0,
+                     flip_y=True):
     """Draw all QR modules on a sketch with optional offset.
 
     Args:
@@ -69,6 +70,8 @@ def draw_all_modules(sketch, module_positions, total_rows, module_size_cm,
         style: 'Square' or 'Circle'.
         offset_x: X offset in cm for centering.
         offset_y: Y offset in cm for centering.
+        flip_y: If True, flip Y so row 0 is at top (for standalone/XY plane).
+                If False, row 0 is at bottom (for Place on Face mode).
 
     Returns:
         int: Number of modules drawn.
@@ -78,23 +81,28 @@ def draw_all_modules(sketch, module_positions, total_rows, module_size_cm,
 
     # Micro-gap prevents adjacent module rectangles from sharing edges,
     # which would cause Fusion to merge profiles unpredictably.
-    # 0.001 cm = 0.01 mm -- invisible but prevents edge merging.
     micro_gap = 0.001
     half_gap = max(spacing_cm / 2.0, micro_gap)
     count = 0
 
     for (row, col) in module_positions:
+        # Y coordinate: flip for standalone (Y+ up), don't flip for face placement
+        if flip_y:
+            row_y = total_rows - 1 - row
+        else:
+            row_y = row
+
         if style == 'Circle':
             cx = offset_x + (col + 0.5) * module_size_cm
-            cy = offset_y + (total_rows - 1 - row + 0.5) * module_size_cm
+            cy = offset_y + (row_y + 0.5) * module_size_cm
             radius = (module_size_cm - spacing_cm) / 2.0 - micro_gap
             if radius > 0:
                 circles.addByCenterRadius(adsk.core.Point3D.create(cx, cy, 0), radius)
         else:
             x0 = offset_x + col * module_size_cm + half_gap
-            y0 = offset_y + (total_rows - 1 - row) * module_size_cm + half_gap
+            y0 = offset_y + row_y * module_size_cm + half_gap
             x1 = offset_x + (col + 1) * module_size_cm - half_gap
-            y1 = offset_y + (total_rows - row) * module_size_cm - half_gap
+            y1 = offset_y + (row_y + 1) * module_size_cm - half_gap
             p1 = adsk.core.Point3D.create(x0, y0, 0)
             p2 = adsk.core.Point3D.create(x1, y1, 0)
             lines.addTwoPointRectangle(p1, p2)
@@ -521,7 +529,7 @@ def cut_and_fill_on_face(component, target_face, target_body, module_positions,
     mod_sketch = component.sketches.add(ref_plane)
     mod_sketch.name = 'QR_Modules_Sketch'
     draw_all_modules(mod_sketch, module_positions, total_rows,
-                     seg_size_cm, spacing_cm, style, offset_x, offset_y)
+                     seg_size_cm, spacing_cm, style, offset_x, offset_y, flip_y=False)
 
     # Step A: Cut module shapes into the body (creates pockets)
     mod_profiles = adsk.core.ObjectCollection.create()
@@ -543,7 +551,7 @@ def cut_and_fill_on_face(component, target_face, target_body, module_positions,
     fill_sketch = component.sketches.add(ref_plane)
     fill_sketch.name = 'QR_Modules_Fill'
     draw_all_modules(fill_sketch, module_positions, total_rows,
-                     seg_size_cm, spacing_cm, style, offset_x, offset_y)
+                     seg_size_cm, spacing_cm, style, offset_x, offset_y, flip_y=False)
 
     modules_body = extrude_profiles_combined(
         component, fill_sketch, depth_cm, 'QR_Modules', False
