@@ -641,12 +641,15 @@ class ExecuteHandler(adsk.core.CommandEventHandler):
                     target_comp = target_body.parentComponent
                     pd.message = f'Placing QR code on face...'
 
-                    fusion_geometry.cut_and_fill_on_face(
-                        target_comp, target_face, target_body,
-                        module_positions, total_rows, total_size_cm,
-                        seg_size_cm, spacing_cm, extrude_cm, style,
-                        frame_on, frame_size_cm, icon_sketch_fn, auto_cut
-                    )
+                    try:
+                        fusion_geometry.cut_and_fill_on_face(
+                            target_comp, target_face, target_body,
+                            module_positions, total_rows, total_size_cm,
+                            seg_size_cm, spacing_cm, extrude_cm, style,
+                            frame_on, frame_size_cm, icon_sketch_fn, auto_cut
+                        )
+                    except Exception:
+                        ui.messageBox(f'Place on Face failed:\n{traceback.format_exc()}')
 
                 # ════════════════════════════════════════════
                 #  STANDALONE: create component with bodies
