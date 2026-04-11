@@ -57,8 +57,8 @@ def draw_circle_module(sketch, col, row, total_rows, module_size_cm, spacing_cm=
 
 
 def draw_all_modules(sketch, module_positions, total_rows, module_size_cm,
-                     spacing_cm=0.0, style='Square'):
-    """Draw all QR modules on a sketch.
+                     spacing_cm=0.0, style='Square', offset_x=0, offset_y=0):
+    """Draw all QR modules on a sketch with optional offset.
 
     Args:
         sketch: adsk.fusion.Sketch
@@ -67,19 +67,38 @@ def draw_all_modules(sketch, module_positions, total_rows, module_size_cm,
         module_size_cm: Module size in cm.
         spacing_cm: Spacing between modules in cm.
         style: 'Square' or 'Circle'.
+        offset_x: X offset in cm for centering.
+        offset_y: Y offset in cm for centering.
 
     Returns:
         int: Number of modules drawn.
     """
-    draw_fn = draw_circle_module if style == 'Circle' else draw_square_module
+    lines = sketch.sketchCurves.sketchLines
+    circles = sketch.sketchCurves.sketchCircles
+    half_gap = spacing_cm / 2.0
     count = 0
+
     for (row, col) in module_positions:
-        draw_fn(sketch, col, row, total_rows, module_size_cm, spacing_cm)
+        if style == 'Circle':
+            cx = offset_x + (col + 0.5) * module_size_cm
+            cy = offset_y + (total_rows - 1 - row + 0.5) * module_size_cm
+            radius = (module_size_cm - spacing_cm) / 2.0
+            if radius > 0:
+                circles.addByCenterRadius(adsk.core.Point3D.create(cx, cy, 0), radius)
+        else:
+            x0 = offset_x + col * module_size_cm + half_gap
+            y0 = offset_y + (total_rows - 1 - row) * module_size_cm + half_gap
+            x1 = offset_x + (col + 1) * module_size_cm - half_gap
+            y1 = offset_y + (total_rows - row) * module_size_cm - half_gap
+            p1 = adsk.core.Point3D.create(x0, y0, 0)
+            p2 = adsk.core.Point3D.create(x1, y1, 0)
+            lines.addTwoPointRectangle(p1, p2)
         count += 1
+
     return count
 
 
-def draw_frame(sketch, total_size_cm, frame_size_cm):
+def draw_frame(sketch, total_size_cm, frame_size_cm, offset_x=0, offset_y=0):
     """Draw a border frame around the QR code.
 
     Creates two concentric rectangles: outer frame and inner cutout.
@@ -88,21 +107,23 @@ def draw_frame(sketch, total_size_cm, frame_size_cm):
         sketch: adsk.fusion.Sketch
         total_size_cm: Total QR code size in cm (modules * module_size).
         frame_size_cm: Frame border width in cm.
+        offset_x: X offset in cm.
+        offset_y: Y offset in cm.
     """
     lines = sketch.sketchCurves.sketchLines
 
     # Outer rectangle
-    outer_p1 = adsk.core.Point3D.create(-frame_size_cm, -frame_size_cm, 0)
+    outer_p1 = adsk.core.Point3D.create(offset_x - frame_size_cm, offset_y - frame_size_cm, 0)
     outer_p2 = adsk.core.Point3D.create(
-        total_size_cm + frame_size_cm,
-        total_size_cm + frame_size_cm,
+        offset_x + total_size_cm + frame_size_cm,
+        offset_y + total_size_cm + frame_size_cm,
         0
     )
     lines.addTwoPointRectangle(outer_p1, outer_p2)
 
     # Inner rectangle (creates the frame profile between outer and inner)
-    inner_p1 = adsk.core.Point3D.create(0, 0, 0)
-    inner_p2 = adsk.core.Point3D.create(total_size_cm, total_size_cm, 0)
+    inner_p1 = adsk.core.Point3D.create(offset_x, offset_y, 0)
+    inner_p2 = adsk.core.Point3D.create(offset_x + total_size_cm, offset_y + total_size_cm, 0)
     lines.addTwoPointRectangle(inner_p1, inner_p2)
 
 
@@ -330,15 +351,68 @@ def create_component(root_comp, name):
         return root_comp
 
 
+def measure_face_bounds(face):
+    """Measure a planar face's width and height in its local coordinate system.
+
+    Returns:
+        tuple: (width_cm, height_cm, center_u, center_v) in sketch coordinates,
+               or None if the face can't be measured.
+    """
+    bbox = face.boundingBox
+    if not bbox:
+        return None
+
+    # Get the face's bounding box in world coordinates
+    min_pt = bbox.minPoint
+    max_pt = bbox.maxPoint
+
+    # Width and height depend on face orientation.
+    # For a sketch created on this face, the sketch axes align with the face.
+    # We use the evaluator to get parameter bounds.
+    evaluator = face.evaluator
+    (ok, param_min, param_max) = evaluator.getParametricRange()
+    if ok:
+        # Map parameter corners to 3D points to measure actual size
+        corners = [
+            adsk.core.Point2D.create(param_min.x, param_min.y),
+            adsk.core.Point2D.create(param_max.x, param_min.y),
+            adsk.core.Point2D.create(param_min.x, param_max.y),
+        ]
+        pts = []
+        for c in corners:
+            (ok2, pt3d) = evaluator.getPointAtParameter(c)
+            if ok2:
+                pts.append(pt3d)
+        if len(pts) == 3:
+            dx = pts[1].x - pts[0].x
+            dy = pts[1].y - pts[0].y
+            dz = pts[1].z - pts[0].z
+            width = math.sqrt(dx*dx + dy*dy + dz*dz)
+
+            dx2 = pts[2].x - pts[0].x
+            dy2 = pts[2].y - pts[0].y
+            dz2 = pts[2].z - pts[0].z
+            height = math.sqrt(dx2*dx2 + dy2*dy2 + dz2*dz2)
+
+            return (width, height)
+
+    # Fallback: use world bounding box extents
+    dx = max_pt.x - min_pt.x
+    dy = max_pt.y - min_pt.y
+    dz = max_pt.z - min_pt.z
+    # Take the two largest extents as width/height
+    dims = sorted([dx, dy, dz], reverse=True)
+    return (dims[0], dims[1])
+
+
 def cut_and_fill_on_face(component, target_face, target_body, module_positions,
                          total_rows, total_size_cm, seg_size_cm, spacing_cm,
                          depth_cm, style, frame_on, frame_size_cm,
-                         icon_sketch_fn=None):
+                         icon_sketch_fn=None, auto_cut=True):
     """Generate QR code directly on an existing face with cut recess + fill.
 
-    Cuts module-shaped recesses into the target body, then extrudes
-    colored fill bodies back up. Result: the target body has pockets,
-    and separate QR_Modules / QR_Frame bodies sit in them.
+    Auto-scales the QR code to fit within the face bounds. Cuts module-shaped
+    recesses into the target body, then extrudes colored fill bodies.
 
     Args:
         component: Component that owns the target body.
@@ -346,14 +420,14 @@ def cut_and_fill_on_face(component, target_face, target_body, module_positions,
         target_body: BRepBody that owns the face.
         module_positions: List of (row, col) for dark modules.
         total_rows: Number of rows in QR matrix.
-        total_size_cm: Total QR size in cm.
-        seg_size_cm: Module size in cm.
-        spacing_cm: Gap between modules in cm.
+        total_size_cm: Total QR size in cm (before auto-scaling).
+        seg_size_cm: Module size in cm (before auto-scaling).
+        spacing_cm: Gap between modules in cm (before auto-scaling).
         depth_cm: Cut/fill depth in cm.
         style: 'Square' or 'Circle'.
         frame_on: Whether to add frame.
-        frame_size_cm: Frame width in cm.
-        icon_sketch_fn: Optional callable(sketch, center_cm, zone_cm) to draw icon.
+        frame_size_cm: Frame width in cm (before auto-scaling).
+        icon_sketch_fn: Optional callable(sketch) to draw icon.
 
     Returns:
         dict with keys 'modules_body', 'frame_body', 'icon_body' (any may be None).
@@ -361,35 +435,71 @@ def cut_and_fill_on_face(component, target_face, target_body, module_positions,
     extrudes = component.features.extrudeFeatures
     result = {'modules_body': None, 'frame_body': None, 'icon_body': None}
 
-    # ── 1. Cut the entire QR area as a recess into the target body ──
-    cut_sketch = component.sketches.add(target_face)
-    cut_sketch.name = 'QR_Recess_Cut'
+    # ── Auto-scale to fit the face ──
+    face_dims = measure_face_bounds(target_face)
+    if face_dims:
+        face_w, face_h = face_dims
+        face_min = min(face_w, face_h)
 
-    if frame_on:
-        cp1 = adsk.core.Point3D.create(-frame_size_cm, -frame_size_cm, 0)
-        cp2 = adsk.core.Point3D.create(
-            total_size_cm + frame_size_cm,
-            total_size_cm + frame_size_cm, 0)
-    else:
-        cp1 = adsk.core.Point3D.create(0, 0, 0)
-        cp2 = adsk.core.Point3D.create(total_size_cm, total_size_cm, 0)
+        # Total QR size including frame margins
+        qr_with_frame = total_size_cm + (2 * frame_size_cm if frame_on else 0)
 
-    cut_sketch.sketchCurves.sketchLines.addTwoPointRectangle(cp1, cp2)
-    cut_prof = cut_sketch.profiles.item(0)
+        if qr_with_frame > 0 and face_min > 0:
+            # Add 5% padding so QR doesn't touch face edges
+            available = face_min * 0.95
+            if qr_with_frame > available:
+                scale = available / qr_with_frame
+                seg_size_cm = seg_size_cm * scale
+                spacing_cm = spacing_cm * scale
+                frame_size_cm = frame_size_cm * scale
+                total_size_cm = total_rows * seg_size_cm
 
-    cut_input = extrudes.createInput(
-        cut_prof, adsk.fusion.FeatureOperations.CutFeatureOperation
-    )
-    cut_dist = adsk.core.ValueInput.createByReal(depth_cm)
-    cut_input.setDistanceExtent(False, cut_dist)
-    cut_input.participantBodies = [target_body]
-    extrudes.add(cut_input)
+    # Compute centering offset: sketch origin is at one corner of the face,
+    # we need to center the QR code on the face
+    offset_x = 0
+    offset_y = 0
+    if face_dims:
+        face_w, face_h = face_dims
+        qr_total_w = total_size_cm + (2 * frame_size_cm if frame_on else 0)
+        qr_total_h = qr_total_w  # QR is square
+        offset_x = (face_w - qr_total_w) / 2.0
+        offset_y = (face_h - qr_total_h) / 2.0
+        if frame_on:
+            offset_x -= frame_size_cm
+            offset_y -= frame_size_cm
 
-    # ── 2. Draw modules on the face and extrude as new combined body ──
+    # ── 1. Optionally cut a recess into the target body ──
+    if auto_cut:
+        cut_sketch = component.sketches.add(target_face)
+        cut_sketch.name = 'QR_Recess_Cut'
+
+        if frame_on:
+            cp1 = adsk.core.Point3D.create(
+                offset_x - frame_size_cm, offset_y - frame_size_cm, 0)
+            cp2 = adsk.core.Point3D.create(
+                offset_x + total_size_cm + frame_size_cm,
+                offset_y + total_size_cm + frame_size_cm, 0)
+        else:
+            cp1 = adsk.core.Point3D.create(offset_x, offset_y, 0)
+            cp2 = adsk.core.Point3D.create(
+                offset_x + total_size_cm, offset_y + total_size_cm, 0)
+
+        cut_sketch.sketchCurves.sketchLines.addTwoPointRectangle(cp1, cp2)
+        cut_prof = cut_sketch.profiles.item(0)
+
+        cut_input = extrudes.createInput(
+            cut_prof, adsk.fusion.FeatureOperations.CutFeatureOperation
+        )
+        cut_dist = adsk.core.ValueInput.createByReal(depth_cm)
+        cut_input.setDistanceExtent(False, cut_dist)
+        cut_input.participantBodies = [target_body]
+        extrudes.add(cut_input)
+
+    # ── 2. Draw modules with offset and extrude as new combined body ──
     mod_sketch = component.sketches.add(target_face)
     mod_sketch.name = 'QR_Modules_Sketch'
     draw_all_modules(mod_sketch, module_positions, total_rows,
-                     seg_size_cm, spacing_cm, style)
+                     seg_size_cm, spacing_cm, style, offset_x, offset_y)
 
     modules_body = extrude_profiles_combined(
         component, mod_sketch, depth_cm, 'QR_Modules', False
@@ -400,7 +510,7 @@ def cut_and_fill_on_face(component, target_face, target_body, module_positions,
     if frame_on:
         frame_sketch = component.sketches.add(target_face)
         frame_sketch.name = 'QR_Frame_Sketch'
-        draw_frame(frame_sketch, total_size_cm, frame_size_cm)
+        draw_frame(frame_sketch, total_size_cm, frame_size_cm, offset_x, offset_y)
         frame_body = extrude_frame_profile(component, frame_sketch, depth_cm)
         result['frame_body'] = frame_body
 

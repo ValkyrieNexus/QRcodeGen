@@ -179,6 +179,9 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
             face_sel.setSelectionLimits(0, 1)
             _add_hidden(face_sel)
 
+            # Auto-cut toggle (only visible in Place on Face mode)
+            _add_hidden(pg.addBoolValueInput('auto_cut', 'Cut recess into body', True, '', True))
+
             # ── Style Options (group) ──
             style_group = inputs.addGroupCommandInput('style_group', 'Style Options')
             style_group.isExpanded = True
@@ -267,6 +270,7 @@ def _update_visibility(inputs):
     place_inp = _find_input(inputs, 'placement_mode')
     is_on_face = place_inp and place_inp.selectedItem and place_inp.selectedItem.name == config.PLACEMENT_ON_FACE
     _set_visible(inputs, 'target_face', is_on_face)
+    _set_visible(inputs, 'auto_cut', is_on_face)
 
     # Frame size: visible only when Frame is checked
     frame_inp = _find_input(inputs, 'frame_enabled')
@@ -537,11 +541,14 @@ class ExecuteHandler(adsk.core.CommandEventHandler):
             placement = place_inp.selectedItem.name if place_inp and place_inp.selectedItem else config.PLACEMENT_STANDALONE
             target_face = None
             target_body = None
+            auto_cut = True
             if placement == config.PLACEMENT_ON_FACE:
                 face_sel = _find_input(inputs, 'target_face')
                 if face_sel and face_sel.selectionCount > 0:
                     target_face = face_sel.selection(0).entity
                     target_body = target_face.body
+                cut_inp = _find_input(inputs, 'auto_cut')
+                auto_cut = cut_inp.value if cut_inp else True
 
             ec_inp = _find_input(inputs, 'error_correction')
             ec_str = 'H'
@@ -638,7 +645,7 @@ class ExecuteHandler(adsk.core.CommandEventHandler):
                         target_comp, target_face, target_body,
                         module_positions, total_rows, total_size_cm,
                         seg_size_cm, spacing_cm, extrude_cm, style,
-                        frame_on, frame_size_cm, icon_sketch_fn
+                        frame_on, frame_size_cm, icon_sketch_fn, auto_cut
                     )
 
                 # ════════════════════════════════════════════
