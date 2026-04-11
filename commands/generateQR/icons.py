@@ -12,6 +12,7 @@ import math
 # Registry of available icons
 ICON_NAMES = [
     'No Icon',
+    'Empty Center',
     'Heart',
     'Star',
     'Mail',

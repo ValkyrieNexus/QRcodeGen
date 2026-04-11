@@ -633,7 +633,7 @@ class ExecuteHandler(adsk.core.CommandEventHandler):
 
                 # ── Build icon callback if needed ──
                 icon_sketch_fn = None
-                if icon_name != 'No Icon' and icon_zone:
+                if icon_name not in ('No Icon', 'Empty Center') and icon_zone:
                     center_cm = total_size_cm / 2.0
                     zone_cm = (icon_zone[2] - icon_zone[0]) * seg_size_cm
 
