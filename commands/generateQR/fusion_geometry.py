@@ -75,14 +75,19 @@ def draw_all_modules(sketch, module_positions, total_rows, module_size_cm,
     """
     lines = sketch.sketchCurves.sketchLines
     circles = sketch.sketchCurves.sketchCircles
-    half_gap = spacing_cm / 2.0
+
+    # Micro-gap prevents adjacent module rectangles from sharing edges,
+    # which would cause Fusion to merge profiles unpredictably.
+    # 0.001 cm = 0.01 mm -- invisible but prevents edge merging.
+    micro_gap = 0.001
+    half_gap = max(spacing_cm / 2.0, micro_gap)
     count = 0
 
     for (row, col) in module_positions:
         if style == 'Circle':
             cx = offset_x + (col + 0.5) * module_size_cm
             cy = offset_y + (total_rows - 1 - row + 0.5) * module_size_cm
-            radius = (module_size_cm - spacing_cm) / 2.0
+            radius = (module_size_cm - spacing_cm) / 2.0 - micro_gap
             if radius > 0:
                 circles.addByCenterRadius(adsk.core.Point3D.create(cx, cy, 0), radius)
         else:
