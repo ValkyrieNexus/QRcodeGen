@@ -631,7 +631,7 @@ class ExecuteHandler(adsk.core.CommandEventHandler):
 
                 if extrude_on:
                     pd.message = f'Extruding QR code {idx + 1}...'
-                    fusion_geometry.extrude_all_profiles(comp, ms, extrude_cm, 'QR_Module', False, None)
+                    fusion_geometry.extrude_profiles_combined(comp, ms, extrude_cm, 'QR_Modules', False)
 
                 pd.progressValue = idx * 100 + 80
 
@@ -677,8 +677,8 @@ class ExecuteHandler(adsk.core.CommandEventHandler):
                                 isk.importSVG(_selected_svg_path, x_offset, y_offset, desired_scale)
 
                                 if extrude_on:
-                                    fusion_geometry.extrude_all_profiles(
-                                        comp, isk, extrude_cm, 'QR_Icon', True, None)
+                                    fusion_geometry.extrude_profiles_combined(
+                                        comp, isk, extrude_cm, 'QR_Icon', True)
                         except Exception:
                             ui.messageBox(f'Failed to import SVG logo:\n{traceback.format_exc()}')
                     else:
@@ -688,8 +688,8 @@ class ExecuteHandler(adsk.core.CommandEventHandler):
                         icons.draw_icon(isk, icon_name, center_cm, center_cm, zone_cm)
 
                         if extrude_on:
-                            fusion_geometry.extrude_all_profiles(
-                                comp, isk, extrude_cm, 'QR_Icon', True, None)
+                            fusion_geometry.extrude_profiles_combined(
+                                comp, isk, extrude_cm, 'QR_Icon', True)
 
                 pd.progressValue = idx * 100 + 100
 

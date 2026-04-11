@@ -165,6 +165,85 @@ def extrude_all_profiles(component, sketch, depth_cm, body_prefix='QR_Module',
     return bodies
 
 
+def extrude_profiles_combined(component, sketch, depth_cm, body_name='QR_Modules',
+                              exclude_largest=False):
+    """Extrude all profiles and combine into a single body.
+
+    Collects all valid profiles into an ObjectCollection, extrudes them
+    in one operation, then uses CombineFeature to union all resulting
+    bodies into one named body.
+
+    Args:
+        component: adsk.fusion.Component
+        sketch: adsk.fusion.Sketch
+        depth_cm: Extrusion depth in cm.
+        body_name: Name for the final combined body.
+        exclude_largest: If True, skip the largest profile (background).
+
+    Returns:
+        adsk.fusion.BRepBody or None: The single combined body.
+    """
+    profiles = sketch.profiles
+    extrudes = component.features.extrudeFeatures
+    distance = adsk.core.ValueInput.createByReal(depth_cm)
+
+    # Find largest profile to exclude (background)
+    largest_idx = -1
+    if exclude_largest and profiles.count > 1:
+        largest_area = 0
+        for i in range(profiles.count):
+            area = profiles.item(i).areaProperties().area
+            if area > largest_area:
+                largest_area = area
+                largest_idx = i
+
+    # Collect valid profiles into ObjectCollection
+    prof_collection = adsk.core.ObjectCollection.create()
+    for i in range(profiles.count):
+        if i == largest_idx:
+            continue
+        prof_collection.add(profiles.item(i))
+
+    if prof_collection.count == 0:
+        return None
+
+    # Single extrude operation for all profiles at once
+    ext_input = extrudes.createInput(
+        prof_collection,
+        adsk.fusion.FeatureOperations.NewBodyFeatureOperation
+    )
+    ext_input.setDistanceExtent(False, distance)
+    feat = extrudes.add(ext_input)
+
+    if not feat or feat.bodies.count == 0:
+        return None
+
+    # If only one body resulted, just name it and return
+    if feat.bodies.count == 1:
+        feat.bodies.item(0).name = body_name
+        return feat.bodies.item(0)
+
+    # Combine all bodies into one using CombineFeature
+    target_body = feat.bodies.item(0)
+    tool_bodies = adsk.core.ObjectCollection.create()
+    for i in range(1, feat.bodies.count):
+        tool_bodies.add(feat.bodies.item(i))
+
+    try:
+        combine_input = component.features.combineFeatures.createInput(
+            target_body, tool_bodies
+        )
+        combine_input.operation = adsk.fusion.FeatureOperations.JoinFeatureOperation
+        combine_input.isKeepToolBodies = False
+        component.features.combineFeatures.add(combine_input)
+    except Exception:
+        # If combine fails (coincident faces), leave as separate bodies
+        pass
+
+    target_body.name = body_name
+    return target_body
+
+
 def extrude_frame_profile(component, sketch, depth_cm):
     """Extrude the frame profile (the ring between outer and inner rectangles).
 
