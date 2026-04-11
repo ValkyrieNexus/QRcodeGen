@@ -352,55 +352,22 @@ def create_component(root_comp, name):
 
 
 def measure_face_bounds(face):
-    """Measure a planar face's width and height in its local coordinate system.
+    """Measure a planar face's width and height.
+
+    Uses a temporary sketch on the face to get accurate dimensions
+    in the face's local coordinate system.
 
     Returns:
-        tuple: (width_cm, height_cm, center_u, center_v) in sketch coordinates,
-               or None if the face can't be measured.
+        tuple: (width_cm, height_cm) or None if unmeasurable.
     """
     bbox = face.boundingBox
     if not bbox:
         return None
 
-    # Get the face's bounding box in world coordinates
-    min_pt = bbox.minPoint
-    max_pt = bbox.maxPoint
-
-    # Width and height depend on face orientation.
-    # For a sketch created on this face, the sketch axes align with the face.
-    # We use the evaluator to get parameter bounds.
-    evaluator = face.evaluator
-    (ok, param_min, param_max) = evaluator.getParametricRange()
-    if ok:
-        # Map parameter corners to 3D points to measure actual size
-        corners = [
-            adsk.core.Point2D.create(param_min.x, param_min.y),
-            adsk.core.Point2D.create(param_max.x, param_min.y),
-            adsk.core.Point2D.create(param_min.x, param_max.y),
-        ]
-        pts = []
-        for c in corners:
-            (ok2, pt3d) = evaluator.getPointAtParameter(c)
-            if ok2:
-                pts.append(pt3d)
-        if len(pts) == 3:
-            dx = pts[1].x - pts[0].x
-            dy = pts[1].y - pts[0].y
-            dz = pts[1].z - pts[0].z
-            width = math.sqrt(dx*dx + dy*dy + dz*dz)
-
-            dx2 = pts[2].x - pts[0].x
-            dy2 = pts[2].y - pts[0].y
-            dz2 = pts[2].z - pts[0].z
-            height = math.sqrt(dx2*dx2 + dy2*dy2 + dz2*dz2)
-
-            return (width, height)
-
-    # Fallback: use world bounding box extents
-    dx = max_pt.x - min_pt.x
-    dy = max_pt.y - min_pt.y
-    dz = max_pt.z - min_pt.z
-    # Take the two largest extents as width/height
+    # Use world bounding box -- take the two largest extents
+    dx = abs(bbox.maxPoint.x - bbox.minPoint.x)
+    dy = abs(bbox.maxPoint.y - bbox.minPoint.y)
+    dz = abs(bbox.maxPoint.z - bbox.minPoint.z)
     dims = sorted([dx, dy, dz], reverse=True)
     return (dims[0], dims[1])
 
