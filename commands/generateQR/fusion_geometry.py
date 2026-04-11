@@ -436,12 +436,19 @@ def cut_and_fill_on_face(component, target_face, target_body, module_positions,
     extrudes = component.features.extrudeFeatures
     result = {'modules_body': None, 'frame_body': None, 'icon_body': None}
 
-    # ── Measure face in sketch-local coordinates ──
-    # Create a temp sketch on the face to get proper sketch-space measurements
-    temp_sketch = component.sketches.add(target_face)
+    # ── Create a construction plane coincident with the face ──
+    # Sketching directly on a BRepFace causes Fusion to auto-project face
+    # boundary edges into the sketch, which corrupts QR module profiles.
+    # Using a construction plane at zero offset avoids this entirely.
+    planes = component.constructionPlanes
+    plane_input = planes.createInput()
+    plane_input.setByOffset(target_face, adsk.core.ValueInput.createByReal(0))
+    ref_plane = planes.add(plane_input)
 
-    # Get face center in sketch coordinates
-    face_center = temp_sketch.modelToSketchSpace(target_face.centroid)
+    # ── Measure face and compute centering ──
+    # Use a single measurement sketch to find face center and dimensions
+    measure_sketch = component.sketches.add(ref_plane)
+    face_center = measure_sketch.modelToSketchSpace(target_face.centroid)
 
     # Project face edges to measure dimensions in sketch space
     face_w = 0
@@ -450,25 +457,23 @@ def cut_and_fill_on_face(component, target_face, target_body, module_positions,
         outer_loop = target_face.loops.item(0)
         for i in range(outer_loop.edges.count):
             try:
-                temp_sketch.project(outer_loop.edges.item(i))
+                measure_sketch.project(outer_loop.edges.item(i))
             except Exception:
                 pass
-        # Use profile bounding box (sketch space) for accurate dimensions
-        if temp_sketch.profiles.count > 0:
-            pbb = temp_sketch.profiles.item(0).boundingBox
+        if measure_sketch.profiles.count > 0:
+            pbb = measure_sketch.profiles.item(0).boundingBox
             face_w = abs(pbb.maxPoint.x - pbb.minPoint.x)
             face_h = abs(pbb.maxPoint.y - pbb.minPoint.y)
     except Exception:
         pass
-
-    temp_sketch.deleteMe()
+    measure_sketch.deleteMe()
 
     face_min = min(face_w, face_h) if face_w > 0 and face_h > 0 else 0
 
     # Auto-scale QR to fit within the face
     qr_with_frame = total_size_cm + (2 * frame_size_cm if frame_on else 0)
     if qr_with_frame > 0 and face_min > 0:
-        available = face_min * 0.95  # 5% padding
+        available = face_min * 0.95
         if qr_with_frame > available:
             scale = available / qr_with_frame
             seg_size_cm = seg_size_cm * scale
@@ -476,18 +481,13 @@ def cut_and_fill_on_face(component, target_face, target_body, module_positions,
             frame_size_cm = frame_size_cm * scale
             total_size_cm = total_rows * seg_size_cm
 
-    # Center QR on the face center (all in sketch-space coordinates)
+    # Center QR on the face center (sketch-space coordinates)
     offset_x = face_center.x - total_size_cm / 2.0
     offset_y = face_center.y - total_size_cm / 2.0
 
-    app = adsk.core.Application.get()
-    app.log(f'QRcodeGen: face_w={face_w:.3f} face_h={face_h:.3f} face_center=({face_center.x:.3f}, {face_center.y:.3f})')
-    app.log(f'QRcodeGen: total_size={total_size_cm:.3f} seg_size={seg_size_cm:.4f} offset=({offset_x:.3f}, {offset_y:.3f})')
-    app.log(f'QRcodeGen: modules={len(module_positions)} profiles will be drawn')
-
     # ── 1. Optionally cut a recess into the target body ──
     if auto_cut:
-        cut_sketch = component.sketches.add(target_face)
+        cut_sketch = component.sketches.add(ref_plane)
         cut_sketch.name = 'QR_Recess_Cut'
 
         if frame_on:
@@ -512,8 +512,8 @@ def cut_and_fill_on_face(component, target_face, target_body, module_positions,
         cut_input.participantBodies = [target_body]
         extrudes.add(cut_input)
 
-    # ── 2. Draw modules centered on face and extrude as combined body ──
-    mod_sketch = component.sketches.add(target_face)
+    # ── 2. Draw modules on construction plane (no auto-projected edges!) ──
+    mod_sketch = component.sketches.add(ref_plane)
     mod_sketch.name = 'QR_Modules_Sketch'
     draw_all_modules(mod_sketch, module_positions, total_rows,
                      seg_size_cm, spacing_cm, style, offset_x, offset_y)
@@ -525,7 +525,7 @@ def cut_and_fill_on_face(component, target_face, target_body, module_positions,
 
     # ── 3. Frame (if enabled) ──
     if frame_on:
-        frame_sketch = component.sketches.add(target_face)
+        frame_sketch = component.sketches.add(ref_plane)
         frame_sketch.name = 'QR_Frame_Sketch'
         draw_frame(frame_sketch, total_size_cm, frame_size_cm, offset_x, offset_y)
         frame_body = extrude_frame_profile(component, frame_sketch, depth_cm)
@@ -533,7 +533,7 @@ def cut_and_fill_on_face(component, target_face, target_body, module_positions,
 
     # ── 4. Icon (if provided) ──
     if icon_sketch_fn:
-        icon_sketch = component.sketches.add(target_face)
+        icon_sketch = component.sketches.add(ref_plane)
         icon_sketch.name = 'QR_Icon_Sketch'
         icon_sketch_fn(icon_sketch)
         icon_body = extrude_profiles_combined(
