@@ -639,9 +639,7 @@ class ExecuteHandler(adsk.core.CommandEventHandler):
 
                     if icon_name == 'Custom SVG...' and _selected_svg_path:
                         svg_path = _selected_svg_path
-                        rot_deg = logo_rot_deg
-                        def icon_sketch_fn(sketch, cx=None, cy=None, _ctr=center_cm, _zone=zone_cm, _path=svg_path, _rot=rot_deg):
-                            import math
+                        def icon_sketch_fn(sketch, cx=None, cy=None, _ctr=center_cm, _zone=zone_cm, _path=svg_path):
                             ctr_x = cx if cx is not None else _ctr
                             ctr_y = cy if cy is not None else _ctr
                             # Two-pass SVG: measure at scale 1, then import scaled and centered
@@ -657,26 +655,6 @@ class ExecuteHandler(adsk.core.CommandEventHandler):
                                 xo = ctr_x - sw * sc / 2.0 - bb.minPoint.x * sc
                                 yo = ctr_y - sh * sc / 2.0 - bb.minPoint.y * sc
                                 sketch.importSVG(_path, xo, yo, sc)
-
-                                # Apply rotation if needed
-                                if _rot != 0:
-                                    angle_rad = math.radians(_rot)
-                                    center_pt = adsk.core.Point3D.create(ctr_x, ctr_y, 0)
-                                    rot_matrix = adsk.core.Matrix3D.create()
-                                    rot_matrix.setToRotation(
-                                        angle_rad,
-                                        adsk.core.Vector3D.create(0, 0, 1),
-                                        center_pt
-                                    )
-                                    # Collect ALL entities (curves + points) and move them
-                                    entities = adsk.core.ObjectCollection.create()
-                                    for ci in range(sketch.sketchCurves.count):
-                                        entities.add(sketch.sketchCurves.item(ci))
-                                    if entities.count > 0:
-                                        try:
-                                            sketch.move(entities, rot_matrix)
-                                        except Exception:
-                                            pass
                     else:
                         def icon_sketch_fn(sketch, cx=None, cy=None, _name=icon_name, _ctr=center_cm, _zone=zone_cm):
                             ctr_x = cx if cx is not None else _ctr

@@ -529,7 +529,7 @@ def cut_and_fill_on_face(component, target_face, target_body, module_positions,
     mod_sketch = component.sketches.add(ref_plane)
     mod_sketch.name = 'QR_Modules_Sketch'
     draw_all_modules(mod_sketch, module_positions, total_rows,
-                     seg_size_cm, spacing_cm, style, offset_x, offset_y, flip_y=False)
+                     seg_size_cm, spacing_cm, style, offset_x, offset_y, flip_y=True)
 
     # Step A: Cut module shapes into the body (creates pockets)
     mod_profiles = adsk.core.ObjectCollection.create()
@@ -551,7 +551,7 @@ def cut_and_fill_on_face(component, target_face, target_body, module_positions,
     fill_sketch = component.sketches.add(ref_plane)
     fill_sketch.name = 'QR_Modules_Fill'
     draw_all_modules(fill_sketch, module_positions, total_rows,
-                     seg_size_cm, spacing_cm, style, offset_x, offset_y, flip_y=False)
+                     seg_size_cm, spacing_cm, style, offset_x, offset_y, flip_y=True)
 
     modules_body = extrude_profiles_combined(
         component, fill_sketch, depth_cm, 'QR_Modules', False
