@@ -162,6 +162,23 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
             _add_hidden(inputs.addIntegerSpinnerCommandInput('seq_end', 'Sequence End', 1, 9999, 1, 6))
             _add_hidden(inputs.addIntegerSpinnerCommandInput('seq_leading_zeros', 'Leading Zeros', 0, 10, 1, 2))
 
+            # ── Placement Mode ──
+            placement_group = inputs.addGroupCommandInput('placement_group', 'Placement')
+            placement_group.isExpanded = True
+            pg = placement_group.children
+
+            place_dd = pg.addDropDownCommandInput(
+                'placement_mode', 'Mode', adsk.core.DropDownStyles.TextListDropDownStyle)
+            place_dd.listItems.add(config.PLACEMENT_STANDALONE, True)
+            place_dd.listItems.add(config.PLACEMENT_ON_FACE, False)
+
+            # Face selection (only visible in Place on Face mode)
+            face_sel = pg.addSelectionInput('target_face', 'Target Face',
+                                            'Select a planar face to place QR on')
+            face_sel.addSelectionFilter('PlanarFaces')
+            face_sel.setSelectionLimits(0, 1)
+            _add_hidden(face_sel)
+
             # ── Style Options (group) ──
             style_group = inputs.addGroupCommandInput('style_group', 'Style Options')
             style_group.isExpanded = True
@@ -181,8 +198,7 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
             _add_hidden(sc.addValueInput('frame_size', 'Frame Size', 'mm',
                                          adsk.core.ValueInput.createByReal(fusion_geometry.mm_to_cm(config.DEFAULT_FRAME_SIZE_MM))))
 
-            sc.addBoolValueInput('extrude_enabled', 'Extrude', True, '', True)
-            sc.addValueInput('extrude_distance', 'Extrude Distance', 'mm',
+            sc.addValueInput('extrude_distance', 'Depth / Height', 'mm',
                              adsk.core.ValueInput.createByReal(fusion_geometry.mm_to_cm(config.DEFAULT_EXTRUDE_DISTANCE_MM)))
 
             icon_dd = sc.addDropDownCommandInput(
@@ -247,15 +263,15 @@ def _update_visibility(inputs):
     for fid in _ALL_MODE_IDS:
         _set_visible(inputs, fid, fid in active_ids)
 
+    # Placement mode: show face selection only in Place on Face mode
+    place_inp = _find_input(inputs, 'placement_mode')
+    is_on_face = place_inp and place_inp.selectedItem and place_inp.selectedItem.name == config.PLACEMENT_ON_FACE
+    _set_visible(inputs, 'target_face', is_on_face)
+
     # Frame size: visible only when Frame is checked
     frame_inp = _find_input(inputs, 'frame_enabled')
     if frame_inp:
         _set_visible(inputs, 'frame_size', frame_inp.value)
-
-    # Extrude distance: visible only when Extrude is checked
-    ext_inp = _find_input(inputs, 'extrude_enabled')
-    if ext_inp:
-        _set_visible(inputs, 'extrude_distance', ext_inp.value)
 
     # SVG path display: visible only when Custom SVG is selected
     icon_inp = _find_input(inputs, 'icon_select')
@@ -464,11 +480,18 @@ class ValidateInputsHandler(adsk.core.ValidateInputsEventHandler):
                 args.areInputsValid = False
                 return
 
-            ext_on = _find_input(inputs, 'extrude_enabled')
             ext_d = _find_input(inputs, 'extrude_distance')
-            if ext_on and ext_on.value and ext_d and ext_d.value <= 0:
+            if ext_d and ext_d.value <= 0:
                 args.areInputsValid = False
                 return
+
+            # Place on Face requires a face selection
+            place_inp = _find_input(inputs, 'placement_mode')
+            if place_inp and place_inp.selectedItem and place_inp.selectedItem.name == config.PLACEMENT_ON_FACE:
+                face_sel = _find_input(inputs, 'target_face')
+                if not face_sel or face_sel.selectionCount == 0:
+                    args.areInputsValid = False
+                    return
 
             icon_inp = _find_input(inputs, 'icon_select')
             if icon_inp and icon_inp.selectedItem:
@@ -507,9 +530,18 @@ class ExecuteHandler(adsk.core.CommandEventHandler):
             frame_on = frame_inp.value if frame_inp else False
             frame_size_cm = _find_input(inputs, 'frame_size').value if frame_on else 0
 
-            ext_inp = _find_input(inputs, 'extrude_enabled')
-            extrude_on = ext_inp.value if ext_inp else True
-            extrude_cm = _find_input(inputs, 'extrude_distance').value if extrude_on else 0
+            extrude_cm = _find_input(inputs, 'extrude_distance').value
+
+            # Placement mode
+            place_inp = _find_input(inputs, 'placement_mode')
+            placement = place_inp.selectedItem.name if place_inp and place_inp.selectedItem else config.PLACEMENT_STANDALONE
+            target_face = None
+            target_body = None
+            if placement == config.PLACEMENT_ON_FACE:
+                face_sel = _find_input(inputs, 'target_face')
+                if face_sel and face_sel.selectionCount > 0:
+                    target_face = face_sel.selection(0).entity
+                    target_body = target_face.body
 
             ec_inp = _find_input(inputs, 'error_correction')
             ec_str = 'H'
@@ -569,30 +601,71 @@ class ExecuteHandler(adsk.core.CommandEventHandler):
 
                 module_positions = qr_logic.compute_rectangles(matrix, dark=True)
 
-                # Create component
-                comp_name = data[:40] if mode != config.MODE_SEQUENCE else data
-                comp = fusion_geometry.create_component(root_comp, comp_name)
+                # ── Build icon callback if needed ──
+                icon_sketch_fn = None
+                if icon_name != 'No Icon' and icon_zone:
+                    center_cm = total_size_cm / 2.0
+                    zone_cm = (icon_zone[2] - icon_zone[0]) * seg_size_cm
 
-                # Sequence grid layout
-                if mode == config.MODE_SEQUENCE and idx > 0:
-                    cols = 3
-                    gap_cm = fusion_geometry.mm_to_cm(20)
-                    total_with_frame = total_size_cm + 2 * frame_size_cm
-                    ox = (idx % cols) * (total_with_frame + gap_cm)
-                    oy = -(idx // cols) * (total_with_frame + gap_cm)
-                    occ = root_comp.occurrences.item(root_comp.occurrences.count - 1)
-                    t = occ.transform
-                    t.translation = adsk.core.Vector3D.create(ox, oy, 0)
-                    occ.transform = t
+                    if icon_name == 'Custom SVG...' and _selected_svg_path:
+                        svg_path = _selected_svg_path
+                        def icon_sketch_fn(sketch, _ctr=center_cm, _zone=zone_cm, _path=svg_path):
+                            # Two-pass SVG: measure then import centered
+                            temp = sketch.parentComponent.sketches.add(sketch.referencePlane)
+                            temp.importSVG(_path, 0, 0, 1.0)
+                            bb = temp.boundingBox
+                            sw = bb.maxPoint.x - bb.minPoint.x
+                            sh = bb.maxPoint.y - bb.minPoint.y
+                            sm = max(sw, sh)
+                            temp.deleteMe()
+                            if sm > 0:
+                                sc = _zone / sm
+                                xo = _ctr - sw * sc / 2.0 - bb.minPoint.x * sc
+                                yo = _ctr - sh * sc / 2.0 - bb.minPoint.y * sc
+                                sketch.importSVG(_path, xo, yo, sc)
+                    else:
+                        def icon_sketch_fn(sketch, _name=icon_name, _ctr=center_cm, _zone=zone_cm):
+                            icons.draw_icon(sketch, _name, _ctr, _ctr, _zone)
 
-                pd.progressValue = idx * 100 + 5
+                # ════════════════════════════════════════════
+                #  PLACE ON FACE: cut recess + fill on target
+                # ════════════════════════════════════════════
+                if placement == config.PLACEMENT_ON_FACE and target_face and target_body:
+                    target_comp = target_body.parentComponent
+                    pd.message = f'Placing QR code on face...'
 
-                # Base plate (light-colored body for the background)
-                if extrude_on:
+                    fusion_geometry.cut_and_fill_on_face(
+                        target_comp, target_face, target_body,
+                        module_positions, total_rows, total_size_cm,
+                        seg_size_cm, spacing_cm, extrude_cm, style,
+                        frame_on, frame_size_cm, icon_sketch_fn
+                    )
+
+                # ════════════════════════════════════════════
+                #  STANDALONE: create component with bodies
+                # ════════════════════════════════════════════
+                else:
+                    comp_name = data[:40] if mode != config.MODE_SEQUENCE else data
+                    comp = fusion_geometry.create_component(root_comp, comp_name)
+
+                    # Sequence grid layout
+                    if mode == config.MODE_SEQUENCE and idx > 0:
+                        cols = 3
+                        gap_cm = fusion_geometry.mm_to_cm(20)
+                        total_with_frame = total_size_cm + 2 * frame_size_cm
+                        ox = (idx % cols) * (total_with_frame + gap_cm)
+                        oy = -(idx // cols) * (total_with_frame + gap_cm)
+                        occ = root_comp.occurrences.item(root_comp.occurrences.count - 1)
+                        t = occ.transform
+                        t.translation = adsk.core.Vector3D.create(ox, oy, 0)
+                        occ.transform = t
+
+                    pd.progressValue = idx * 100 + 5
+
+                    # Base plate
                     bp_sketch = comp.sketches.add(comp.xYConstructionPlane)
                     bp_sketch.name = 'QR_BasePlate_Sketch'
                     if frame_on:
-                        # Base plate covers frame area
                         bp_p1 = adsk.core.Point3D.create(-frame_size_cm, -frame_size_cm, 0)
                         bp_p2 = adsk.core.Point3D.create(
                             total_size_cm + frame_size_cm,
@@ -601,7 +674,6 @@ class ExecuteHandler(adsk.core.CommandEventHandler):
                         bp_p1 = adsk.core.Point3D.create(0, 0, 0)
                         bp_p2 = adsk.core.Point3D.create(total_size_cm, total_size_cm, 0)
                     bp_sketch.sketchCurves.sketchLines.addTwoPointRectangle(bp_p1, bp_p2)
-                    # Extrude base plate at half the module depth
                     base_depth_cm = extrude_cm * 0.5
                     bp_prof = bp_sketch.profiles.item(0)
                     bp_ext = comp.features.extrudeFeatures.createInput(
@@ -611,85 +683,35 @@ class ExecuteHandler(adsk.core.CommandEventHandler):
                     if bp_feat and bp_feat.bodies.count > 0:
                         bp_feat.bodies.item(0).name = 'QR_BasePlate'
 
-                pd.progressValue = idx * 100 + 10
+                    pd.progressValue = idx * 100 + 10
 
-                # Frame
-                if frame_on and extrude_on:
-                    fs = comp.sketches.add(comp.xYConstructionPlane)
-                    fs.name = 'QR_Frame_Sketch'
-                    fusion_geometry.draw_frame(fs, total_size_cm, frame_size_cm)
-                    fusion_geometry.extrude_frame_profile(comp, fs, extrude_cm)
+                    # Frame
+                    if frame_on:
+                        fs = comp.sketches.add(comp.xYConstructionPlane)
+                        fs.name = 'QR_Frame_Sketch'
+                        fusion_geometry.draw_frame(fs, total_size_cm, frame_size_cm)
+                        fusion_geometry.extrude_frame_profile(comp, fs, extrude_cm)
 
-                pd.progressValue = idx * 100 + 20
+                    pd.progressValue = idx * 100 + 20
 
-                # Modules
-                ms = comp.sketches.add(comp.xYConstructionPlane)
-                ms.name = 'QR_Modules_Sketch'
-                fusion_geometry.draw_all_modules(ms, module_positions, total_rows, seg_size_cm, spacing_cm, style)
+                    # Modules
+                    ms = comp.sketches.add(comp.xYConstructionPlane)
+                    ms.name = 'QR_Modules_Sketch'
+                    fusion_geometry.draw_all_modules(ms, module_positions, total_rows, seg_size_cm, spacing_cm, style)
 
-                pd.progressValue = idx * 100 + 50
+                    pd.progressValue = idx * 100 + 50
 
-                if extrude_on:
                     pd.message = f'Extruding QR code {idx + 1}...'
                     fusion_geometry.extrude_profiles_combined(comp, ms, extrude_cm, 'QR_Modules', False)
 
-                pd.progressValue = idx * 100 + 80
+                    pd.progressValue = idx * 100 + 80
 
-                # Icon
-                if icon_name != 'No Icon' and icon_zone:
-                    center_cm = total_size_cm / 2.0
-                    zone_cm = (icon_zone[2] - icon_zone[0]) * seg_size_cm
-
-                    if icon_name == 'Custom SVG...' and _selected_svg_path:
-                        try:
-                            # Two-pass SVG import: first import to measure, then re-import centered
-                            # Pass 1: import at origin with scale=1 to measure bounding box
-                            temp_sketch = comp.sketches.add(comp.xYConstructionPlane)
-                            temp_sketch.name = 'QR_SVG_Temp'
-                            temp_sketch.importSVG(_selected_svg_path, 0, 0, 1.0)
-
-                            # Measure bounding box
-                            bbox = temp_sketch.boundingBox
-                            svg_w = bbox.maxPoint.x - bbox.minPoint.x
-                            svg_h = bbox.maxPoint.y - bbox.minPoint.y
-                            svg_max = max(svg_w, svg_h)
-
-                            # Delete temp sketch
-                            temp_sketch.deleteMe()
-
-                            if svg_max > 0:
-                                # Compute scale to fit in the zone
-                                desired_scale = zone_cm / svg_max
-
-                                # Pass 2: import scaled and centered
-                                isk = comp.sketches.add(comp.xYConstructionPlane)
-                                isk.name = 'QR_Icon_Sketch'
-
-                                # After scaling, the SVG dimensions become:
-                                scaled_w = svg_w * desired_scale
-                                scaled_h = svg_h * desired_scale
-
-                                # Offset to center the scaled SVG in the QR code center
-                                # Account for the SVG's own min point offset
-                                x_offset = center_cm - scaled_w / 2.0 - bbox.minPoint.x * desired_scale
-                                y_offset = center_cm - scaled_h / 2.0 - bbox.minPoint.y * desired_scale
-
-                                isk.importSVG(_selected_svg_path, x_offset, y_offset, desired_scale)
-
-                                if extrude_on:
-                                    fusion_geometry.extrude_profiles_combined(
-                                        comp, isk, extrude_cm, 'QR_Icon', True)
-                        except Exception:
-                            ui.messageBox(f'Failed to import SVG logo:\n{traceback.format_exc()}')
-                    else:
-                        # Built-in icon
+                    # Icon
+                    if icon_sketch_fn:
                         isk = comp.sketches.add(comp.xYConstructionPlane)
                         isk.name = 'QR_Icon_Sketch'
-                        icons.draw_icon(isk, icon_name, center_cm, center_cm, zone_cm)
-
-                        if extrude_on:
-                            fusion_geometry.extrude_profiles_combined(
-                                comp, isk, extrude_cm, 'QR_Icon', True)
+                        icon_sketch_fn(isk)
+                        fusion_geometry.extrude_profiles_combined(comp, isk, extrude_cm, 'QR_Icon', True)
 
                 pd.progressValue = idx * 100 + 100
 

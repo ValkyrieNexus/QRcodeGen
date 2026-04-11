@@ -328,3 +328,90 @@ def create_component(root_comp, name):
     except Exception:
         # Part design -- can't add components, use root directly
         return root_comp
+
+
+def cut_and_fill_on_face(component, target_face, target_body, module_positions,
+                         total_rows, total_size_cm, seg_size_cm, spacing_cm,
+                         depth_cm, style, frame_on, frame_size_cm,
+                         icon_sketch_fn=None):
+    """Generate QR code directly on an existing face with cut recess + fill.
+
+    Cuts module-shaped recesses into the target body, then extrudes
+    colored fill bodies back up. Result: the target body has pockets,
+    and separate QR_Modules / QR_Frame bodies sit in them.
+
+    Args:
+        component: Component that owns the target body.
+        target_face: BRepFace to place QR on.
+        target_body: BRepBody that owns the face.
+        module_positions: List of (row, col) for dark modules.
+        total_rows: Number of rows in QR matrix.
+        total_size_cm: Total QR size in cm.
+        seg_size_cm: Module size in cm.
+        spacing_cm: Gap between modules in cm.
+        depth_cm: Cut/fill depth in cm.
+        style: 'Square' or 'Circle'.
+        frame_on: Whether to add frame.
+        frame_size_cm: Frame width in cm.
+        icon_sketch_fn: Optional callable(sketch, center_cm, zone_cm) to draw icon.
+
+    Returns:
+        dict with keys 'modules_body', 'frame_body', 'icon_body' (any may be None).
+    """
+    extrudes = component.features.extrudeFeatures
+    result = {'modules_body': None, 'frame_body': None, 'icon_body': None}
+
+    # ── 1. Cut the entire QR area as a recess into the target body ──
+    cut_sketch = component.sketches.add(target_face)
+    cut_sketch.name = 'QR_Recess_Cut'
+
+    if frame_on:
+        cp1 = adsk.core.Point3D.create(-frame_size_cm, -frame_size_cm, 0)
+        cp2 = adsk.core.Point3D.create(
+            total_size_cm + frame_size_cm,
+            total_size_cm + frame_size_cm, 0)
+    else:
+        cp1 = adsk.core.Point3D.create(0, 0, 0)
+        cp2 = adsk.core.Point3D.create(total_size_cm, total_size_cm, 0)
+
+    cut_sketch.sketchCurves.sketchLines.addTwoPointRectangle(cp1, cp2)
+    cut_prof = cut_sketch.profiles.item(0)
+
+    cut_input = extrudes.createInput(
+        cut_prof, adsk.fusion.FeatureOperations.CutFeatureOperation
+    )
+    cut_dist = adsk.core.ValueInput.createByReal(depth_cm)
+    cut_input.setDistanceExtent(False, cut_dist)
+    cut_input.participantBodies = [target_body]
+    extrudes.add(cut_input)
+
+    # ── 2. Draw modules on the face and extrude as new combined body ──
+    mod_sketch = component.sketches.add(target_face)
+    mod_sketch.name = 'QR_Modules_Sketch'
+    draw_all_modules(mod_sketch, module_positions, total_rows,
+                     seg_size_cm, spacing_cm, style)
+
+    modules_body = extrude_profiles_combined(
+        component, mod_sketch, depth_cm, 'QR_Modules', False
+    )
+    result['modules_body'] = modules_body
+
+    # ── 3. Frame (if enabled) ──
+    if frame_on:
+        frame_sketch = component.sketches.add(target_face)
+        frame_sketch.name = 'QR_Frame_Sketch'
+        draw_frame(frame_sketch, total_size_cm, frame_size_cm)
+        frame_body = extrude_frame_profile(component, frame_sketch, depth_cm)
+        result['frame_body'] = frame_body
+
+    # ── 4. Icon (if provided) ──
+    if icon_sketch_fn:
+        icon_sketch = component.sketches.add(target_face)
+        icon_sketch.name = 'QR_Icon_Sketch'
+        icon_sketch_fn(icon_sketch)
+        icon_body = extrude_profiles_combined(
+            component, icon_sketch, depth_cm, 'QR_Icon', True
+        )
+        result['icon_body'] = icon_body
+
+    return result
