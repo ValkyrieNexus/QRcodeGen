@@ -402,38 +402,49 @@ def cut_and_fill_on_face(component, target_face, target_body, module_positions,
     extrudes = component.features.extrudeFeatures
     result = {'modules_body': None, 'frame_body': None, 'icon_body': None}
 
-    # ── Auto-scale to fit the face ──
-    face_dims = measure_face_bounds(target_face)
-    if face_dims:
-        face_w, face_h = face_dims
-        face_min = min(face_w, face_h)
+    # ── Measure face in sketch-local coordinates ──
+    # Create a temp sketch on the face to get proper sketch-space measurements
+    temp_sketch = component.sketches.add(target_face)
 
-        # Total QR size including frame margins
-        qr_with_frame = total_size_cm + (2 * frame_size_cm if frame_on else 0)
+    # Get face center in sketch coordinates
+    face_center = temp_sketch.modelToSketchSpace(target_face.centroid)
 
-        if qr_with_frame > 0 and face_min > 0:
-            # Add 5% padding so QR doesn't touch face edges
-            available = face_min * 0.95
-            if qr_with_frame > available:
-                scale = available / qr_with_frame
-                seg_size_cm = seg_size_cm * scale
-                spacing_cm = spacing_cm * scale
-                frame_size_cm = frame_size_cm * scale
-                total_size_cm = total_rows * seg_size_cm
+    # Project face edges to measure dimensions in sketch space
+    face_w = 0
+    face_h = 0
+    try:
+        outer_loop = target_face.loops.item(0)
+        for i in range(outer_loop.edges.count):
+            try:
+                temp_sketch.project(outer_loop.edges.item(i))
+            except Exception:
+                pass
+        # Use profile bounding box (sketch space) for accurate dimensions
+        if temp_sketch.profiles.count > 0:
+            pbb = temp_sketch.profiles.item(0).boundingBox
+            face_w = abs(pbb.maxPoint.x - pbb.minPoint.x)
+            face_h = abs(pbb.maxPoint.y - pbb.minPoint.y)
+    except Exception:
+        pass
 
-    # Compute centering offset: sketch origin is at one corner of the face,
-    # we need to center the QR code on the face
-    offset_x = 0
-    offset_y = 0
-    if face_dims:
-        face_w, face_h = face_dims
-        qr_total_w = total_size_cm + (2 * frame_size_cm if frame_on else 0)
-        qr_total_h = qr_total_w  # QR is square
-        offset_x = (face_w - qr_total_w) / 2.0
-        offset_y = (face_h - qr_total_h) / 2.0
-        if frame_on:
-            offset_x -= frame_size_cm
-            offset_y -= frame_size_cm
+    temp_sketch.deleteMe()
+
+    face_min = min(face_w, face_h) if face_w > 0 and face_h > 0 else 0
+
+    # Auto-scale QR to fit within the face
+    qr_with_frame = total_size_cm + (2 * frame_size_cm if frame_on else 0)
+    if qr_with_frame > 0 and face_min > 0:
+        available = face_min * 0.95  # 5% padding
+        if qr_with_frame > available:
+            scale = available / qr_with_frame
+            seg_size_cm = seg_size_cm * scale
+            spacing_cm = spacing_cm * scale
+            frame_size_cm = frame_size_cm * scale
+            total_size_cm = total_rows * seg_size_cm
+
+    # Center QR on the face center (all in sketch-space coordinates)
+    offset_x = face_center.x - total_size_cm / 2.0
+    offset_y = face_center.y - total_size_cm / 2.0
 
     # ── 1. Optionally cut a recess into the target body ──
     if auto_cut:
@@ -462,7 +473,7 @@ def cut_and_fill_on_face(component, target_face, target_body, module_positions,
         cut_input.participantBodies = [target_body]
         extrudes.add(cut_input)
 
-    # ── 2. Draw modules with offset and extrude as new combined body ──
+    # ── 2. Draw modules centered on face and extrude as combined body ──
     mod_sketch = component.sketches.add(target_face)
     mod_sketch.name = 'QR_Modules_Sketch'
     draw_all_modules(mod_sketch, module_positions, total_rows,
