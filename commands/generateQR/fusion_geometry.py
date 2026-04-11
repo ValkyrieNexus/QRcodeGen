@@ -229,12 +229,46 @@ def extrude_profiles_combined(component, sketch, depth_cm, body_name='QR_Modules
         return None
 
     # Single extrude operation for all profiles at once
-    ext_input = extrudes.createInput(
-        prof_collection,
-        adsk.fusion.FeatureOperations.NewBodyFeatureOperation
-    )
-    ext_input.setDistanceExtent(False, distance)
-    feat = extrudes.add(ext_input)
+    try:
+        ext_input = extrudes.createInput(
+            prof_collection,
+            adsk.fusion.FeatureOperations.NewBodyFeatureOperation
+        )
+        ext_input.setDistanceExtent(False, distance)
+        feat = extrudes.add(ext_input)
+    except Exception:
+        # If batch extrude fails, fall back to individual extrusions
+        app = adsk.core.Application.get()
+        app.log(f'QRcodeGen: Batch extrude failed for {prof_collection.count} profiles, falling back to individual')
+        bodies = []
+        for i in range(prof_collection.count):
+            try:
+                single_input = extrudes.createInput(
+                    prof_collection.item(i),
+                    adsk.fusion.FeatureOperations.NewBodyFeatureOperation
+                )
+                single_input.setDistanceExtent(False, distance)
+                f = extrudes.add(single_input)
+                if f and f.bodies.count > 0:
+                    bodies.append(f.bodies.item(0))
+            except Exception:
+                pass
+        if not bodies:
+            return None
+        target = bodies[0]
+        if len(bodies) > 1:
+            tool_col = adsk.core.ObjectCollection.create()
+            for b in bodies[1:]:
+                tool_col.add(b)
+            try:
+                ci = component.features.combineFeatures.createInput(target, tool_col)
+                ci.operation = adsk.fusion.FeatureOperations.JoinFeatureOperation
+                ci.isKeepToolBodies = False
+                component.features.combineFeatures.add(ci)
+            except Exception:
+                pass
+        target.name = body_name
+        return target
 
     if not feat or feat.bodies.count == 0:
         return None
@@ -445,6 +479,11 @@ def cut_and_fill_on_face(component, target_face, target_body, module_positions,
     # Center QR on the face center (all in sketch-space coordinates)
     offset_x = face_center.x - total_size_cm / 2.0
     offset_y = face_center.y - total_size_cm / 2.0
+
+    app = adsk.core.Application.get()
+    app.log(f'QRcodeGen: face_w={face_w:.3f} face_h={face_h:.3f} face_center=({face_center.x:.3f}, {face_center.y:.3f})')
+    app.log(f'QRcodeGen: total_size={total_size_cm:.3f} seg_size={seg_size_cm:.4f} offset=({offset_x:.3f}, {offset_y:.3f})')
+    app.log(f'QRcodeGen: modules={len(module_positions)} profiles will be drawn')
 
     # ── 1. Optionally cut a recess into the target body ──
     if auto_cut:
