@@ -512,23 +512,66 @@ def cut_and_fill_on_face(component, target_face, target_body, module_positions,
         cut_input.participantBodies = [target_body]
         extrudes.add(cut_input)
 
-    # ── 2. Draw modules on construction plane (no auto-projected edges!) ──
+    # ── 2. Draw modules on construction plane ──
     mod_sketch = component.sketches.add(ref_plane)
     mod_sketch.name = 'QR_Modules_Sketch'
     draw_all_modules(mod_sketch, module_positions, total_rows,
                      seg_size_cm, spacing_cm, style, offset_x, offset_y)
 
+    # Step A: Cut module shapes into the body (creates pockets)
+    mod_profiles = adsk.core.ObjectCollection.create()
+    for i in range(mod_sketch.profiles.count):
+        mod_profiles.add(mod_sketch.profiles.item(i))
+
+    if mod_profiles.count > 0:
+        try:
+            cut_mod = extrudes.createInput(
+                mod_profiles, adsk.fusion.FeatureOperations.CutFeatureOperation)
+            cut_mod.setDistanceExtent(False, adsk.core.ValueInput.createByReal(depth_cm))
+            cut_mod.participantBodies = [target_body]
+            extrudes.add(cut_mod)
+        except Exception:
+            pass
+
+    # Step B: Fill pockets with new bodies (same sketch, same profiles)
+    # Re-draw modules on a fresh sketch for the fill extrusion
+    fill_sketch = component.sketches.add(ref_plane)
+    fill_sketch.name = 'QR_Modules_Fill'
+    draw_all_modules(fill_sketch, module_positions, total_rows,
+                     seg_size_cm, spacing_cm, style, offset_x, offset_y)
+
     modules_body = extrude_profiles_combined(
-        component, mod_sketch, depth_cm, 'QR_Modules', False
+        component, fill_sketch, depth_cm, 'QR_Modules', False
     )
     result['modules_body'] = modules_body
 
     # ── 3. Frame (if enabled) ──
     if frame_on:
-        frame_sketch = component.sketches.add(ref_plane)
-        frame_sketch.name = 'QR_Frame_Sketch'
-        draw_frame(frame_sketch, total_size_cm, frame_size_cm, offset_x, offset_y)
-        frame_body = extrude_frame_profile(component, frame_sketch, depth_cm)
+        # Cut frame shape
+        frame_cut_sketch = component.sketches.add(ref_plane)
+        frame_cut_sketch.name = 'QR_Frame_Cut'
+        draw_frame(frame_cut_sketch, total_size_cm, frame_size_cm, offset_x, offset_y)
+        # Find the frame profile (smaller area of the two)
+        if frame_cut_sketch.profiles.count >= 2:
+            areas = []
+            for i in range(frame_cut_sketch.profiles.count):
+                areas.append((frame_cut_sketch.profiles.item(i).areaProperties().area, i))
+            areas.sort()
+            frame_prof = frame_cut_sketch.profiles.item(areas[0][1])
+            try:
+                fc_input = extrudes.createInput(
+                    frame_prof, adsk.fusion.FeatureOperations.CutFeatureOperation)
+                fc_input.setDistanceExtent(False, adsk.core.ValueInput.createByReal(depth_cm))
+                fc_input.participantBodies = [target_body]
+                extrudes.add(fc_input)
+            except Exception:
+                pass
+
+        # Fill frame with new body
+        frame_fill_sketch = component.sketches.add(ref_plane)
+        frame_fill_sketch.name = 'QR_Frame_Fill'
+        draw_frame(frame_fill_sketch, total_size_cm, frame_size_cm, offset_x, offset_y)
+        frame_body = extrude_frame_profile(component, frame_fill_sketch, depth_cm)
         result['frame_body'] = frame_body
 
     # ── 4. Icon (if provided) ──
