@@ -616,7 +616,10 @@ class ExecuteHandler(adsk.core.CommandEventHandler):
 
                     if icon_name == 'Custom SVG...' and _selected_svg_path:
                         svg_path = _selected_svg_path
-                        def icon_sketch_fn(sketch, _ctr=center_cm, _zone=zone_cm, _path=svg_path):
+                        def icon_sketch_fn(sketch, cx=None, cy=None, _ctr=center_cm, _zone=zone_cm, _path=svg_path):
+                            # Use override center if provided (Place on Face mode)
+                            ctr_x = cx if cx is not None else _ctr
+                            ctr_y = cy if cy is not None else _ctr
                             # Two-pass SVG: measure then import centered
                             temp = sketch.parentComponent.sketches.add(sketch.referencePlane)
                             temp.importSVG(_path, 0, 0, 1.0)
@@ -627,12 +630,14 @@ class ExecuteHandler(adsk.core.CommandEventHandler):
                             temp.deleteMe()
                             if sm > 0:
                                 sc = _zone / sm
-                                xo = _ctr - sw * sc / 2.0 - bb.minPoint.x * sc
-                                yo = _ctr - sh * sc / 2.0 - bb.minPoint.y * sc
+                                xo = ctr_x - sw * sc / 2.0 - bb.minPoint.x * sc
+                                yo = ctr_y - sh * sc / 2.0 - bb.minPoint.y * sc
                                 sketch.importSVG(_path, xo, yo, sc)
                     else:
-                        def icon_sketch_fn(sketch, _name=icon_name, _ctr=center_cm, _zone=zone_cm):
-                            icons.draw_icon(sketch, _name, _ctr, _ctr, _zone)
+                        def icon_sketch_fn(sketch, cx=None, cy=None, _name=icon_name, _ctr=center_cm, _zone=zone_cm):
+                            ctr_x = cx if cx is not None else _ctr
+                            ctr_y = cy if cy is not None else _ctr
+                            icons.draw_icon(sketch, _name, ctr_x, ctr_y, _zone)
 
                 # ════════════════════════════════════════════
                 #  PLACE ON FACE: cut recess + fill on target

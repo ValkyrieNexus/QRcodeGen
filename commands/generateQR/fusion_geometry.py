@@ -581,9 +581,19 @@ def cut_and_fill_on_face(component, target_face, target_body, module_positions,
 
     # ── 4. Icon (if provided) ──
     if icon_sketch_fn:
+        # Icon needs centering at the actual QR center (with offset)
+        actual_center_x = offset_x + total_size_cm / 2.0
+        actual_center_y = offset_y + total_size_cm / 2.0
+
         icon_sketch = component.sketches.add(ref_plane)
         icon_sketch.name = 'QR_Icon_Sketch'
-        icon_sketch_fn(icon_sketch)
+
+        # Try calling with center coords, fall back to basic call
+        try:
+            icon_sketch_fn(icon_sketch, actual_center_x, actual_center_y)
+        except TypeError:
+            icon_sketch_fn(icon_sketch)
+
         icon_body = extrude_profiles_combined(
             component, icon_sketch, depth_cm, 'QR_Icon', True
         )
