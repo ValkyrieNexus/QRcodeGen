@@ -616,7 +616,8 @@ class ExecuteHandler(adsk.core.CommandEventHandler):
 
                     if icon_name == 'Custom SVG...' and _selected_svg_path:
                         svg_path = _selected_svg_path
-                        def icon_sketch_fn(sketch, cx=None, cy=None, _ctr=center_cm, _zone=zone_cm, _path=svg_path):
+                        is_on_face = (placement == config.PLACEMENT_ON_FACE)
+                        def icon_sketch_fn(sketch, cx=None, cy=None, _ctr=center_cm, _zone=zone_cm, _path=svg_path, _on_face=is_on_face):
                             # Use override center if provided (Place on Face mode)
                             ctr_x = cx if cx is not None else _ctr
                             ctr_y = cy if cy is not None else _ctr
@@ -631,8 +632,16 @@ class ExecuteHandler(adsk.core.CommandEventHandler):
                             if sm > 0:
                                 sc = _zone / sm
                                 xo = ctr_x - sw * sc / 2.0 - bb.minPoint.x * sc
-                                yo = ctr_y - sh * sc / 2.0 - bb.minPoint.y * sc
-                                sketch.importSVG(_path, xo, yo, sc)
+                                if _on_face:
+                                    # In Place on Face mode, Y is not flipped for modules
+                                    # but SVG Y-axis is naturally inverted (SVG Y goes down).
+                                    # So the SVG actually aligns correctly when we DON'T
+                                    # compensate -- just center it vertically.
+                                    yo = ctr_y - sh * sc / 2.0 + bb.maxPoint.y * sc
+                                    sketch.importSVG(_path, xo, yo, -sc)
+                                else:
+                                    yo = ctr_y - sh * sc / 2.0 - bb.minPoint.y * sc
+                                    sketch.importSVG(_path, xo, yo, sc)
                     else:
                         def icon_sketch_fn(sketch, cx=None, cy=None, _name=icon_name, _ctr=center_cm, _zone=zone_cm):
                             ctr_x = cx if cx is not None else _ctr
