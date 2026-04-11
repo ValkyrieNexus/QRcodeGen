@@ -633,21 +633,24 @@ class ExecuteHandler(adsk.core.CommandEventHandler):
                                 yo = ctr_y - sh * sc / 2.0 - bb.minPoint.y * sc
                                 sketch.importSVG(_path, xo, yo, sc)
 
-                                # Rotate 180° around center if in Place on Face mode
+                                # Rotate 90° CCW around center for Place on Face mode
                                 if cx is not None:
                                     import math
-                                    curves = adsk.core.ObjectCollection.create()
-                                    for ci in range(sketch.sketchCurves.count):
-                                        curves.add(sketch.sketchCurves.item(ci))
-                                    if curves.count > 0:
-                                        center_pt = adsk.core.Point3D.create(ctr_x, ctr_y, 0)
-                                        rot = adsk.core.Matrix3D.create()
-                                        rot.setToRotation(
-                                            math.pi / 2,  # 90 degrees
-                                            adsk.core.Vector3D.create(0, 0, 1),  # Z axis
-                                            center_pt
-                                        )
-                                        sketch.move(curves, rot)
+                                    # Move each sketch point: rotate (x,y) around (ctr_x, ctr_y) by 90° CCW
+                                    # Formula: x' = cx - (y - cy), y' = cy + (x - cx)
+                                    for pi in range(sketch.sketchPoints.count):
+                                        pt = sketch.sketchPoints.item(pi)
+                                        if pt.isFixed:
+                                            continue
+                                        try:
+                                            old_x = pt.geometry.x
+                                            old_y = pt.geometry.y
+                                            new_x = ctr_x - (old_y - ctr_y)
+                                            new_y = ctr_y + (old_x - ctr_x)
+                                            pt.move(adsk.core.Vector3D.create(
+                                                new_x - old_x, new_y - old_y, 0))
+                                        except Exception:
+                                            pass
                     else:
                         def icon_sketch_fn(sketch, cx=None, cy=None, _name=icon_name, _ctr=center_cm, _zone=zone_cm):
                             ctr_x = cx if cx is not None else _ctr
