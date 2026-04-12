@@ -15,11 +15,15 @@ _handlers = []
 _selected_svg_path = ''
 
 
+EXPORT_CMD_ID = 'QRcodeGen_ExportBambu'
+
+
 def start():
-    """Register the command in the Fusion UI."""
+    """Register the commands in the Fusion UI."""
     app = adsk.core.Application.get()
     ui = app.userInterface
 
+    # ── QR Code Creator command ──
     cmd_def = ui.commandDefinitions.itemById(config.CMD_ID)
     if cmd_def:
         cmd_def.deleteMe()
@@ -47,25 +51,143 @@ def start():
                 control.isPromotedByDefault = True
                 control.isPromoted = True
 
+    # ── Export for Bambu command ──
+    export_def = ui.commandDefinitions.itemById(EXPORT_CMD_ID)
+    if export_def:
+        export_def.deleteMe()
+
+    export_def = ui.commandDefinitions.addButtonDefinition(
+        EXPORT_CMD_ID,
+        'Export QR for Bambu',
+        'Export placard and QR module bodies as separate STLs for multi-color printing in Bambu Studio',
+        resource_folder if os.path.isdir(resource_folder) else ''
+    )
+
+    on_export = ExportBambuHandler()
+    export_def.commandCreated.add(on_export)
+    _handlers.append(on_export)
+
+    if workspace:
+        panel = workspace.toolbarPanels.itemById(config.PANEL_ID)
+        if panel:
+            existing = panel.controls.itemById(EXPORT_CMD_ID)
+            if not existing:
+                panel.controls.addCommand(export_def)
+
 
 def stop():
-    """Remove the command from the Fusion UI."""
+    """Remove the commands from the Fusion UI."""
     app = adsk.core.Application.get()
     ui = app.userInterface
 
-    cmd_def = ui.commandDefinitions.itemById(config.CMD_ID)
-    if cmd_def:
-        cmd_def.deleteMe()
+    for cmd_id in [config.CMD_ID, EXPORT_CMD_ID]:
+        cmd_def = ui.commandDefinitions.itemById(cmd_id)
+        if cmd_def:
+            cmd_def.deleteMe()
 
     workspace = ui.workspaces.itemById(config.WORKSPACE_ID)
     if workspace:
         panel = workspace.toolbarPanels.itemById(config.PANEL_ID)
         if panel:
-            control = panel.controls.itemById(config.CMD_ID)
-            if control:
-                control.deleteMe()
+            for cmd_id in [config.CMD_ID, EXPORT_CMD_ID]:
+                control = panel.controls.itemById(cmd_id)
+                if control:
+                    control.deleteMe()
 
     _handlers.clear()
+
+
+class ExportBambuHandler(adsk.core.CommandCreatedEventHandler):
+    """Exports placard + QR modules as two separate STL files for Bambu Studio."""
+    def notify(self, args):
+        try:
+            app = adsk.core.Application.get()
+            ui = app.userInterface
+            design = adsk.fusion.Design.cast(app.activeProduct)
+            if not design:
+                ui.messageBox('No active design.')
+                return
+
+            root_comp = design.rootComponent
+            all_bodies = root_comp.bRepBodies
+
+            # Separate QR module bodies from everything else
+            qr_bodies = []
+            other_bodies = []
+            for i in range(all_bodies.count):
+                body = all_bodies.item(i)
+                if body.name.startswith('QR_Module') or body.name.startswith('QR_Frame'):
+                    qr_bodies.append(body)
+                else:
+                    other_bodies.append(body)
+
+            if not qr_bodies:
+                ui.messageBox('No QR module bodies found. Generate a QR code first using "Place on Face" mode.')
+                return
+
+            # Ask user for output folder
+            dlg = ui.createFolderDialog()
+            dlg.title = 'Select Output Folder for STL Files'
+            if dlg.showDialog() != adsk.core.DialogResults.DialogOK:
+                return
+            output_folder = dlg.folder
+
+            export_mgr = design.exportManager
+
+            # Export placard (non-QR bodies): hide QR bodies, export component
+            for b in qr_bodies:
+                b.isVisible = False
+            for b in other_bodies:
+                b.isVisible = True
+
+            placard_path = os.path.join(output_folder, 'placard.stl')
+            stl_opts = export_mgr.createSTLExportOptions(root_comp, placard_path)
+            stl_opts.sendToPrintUtility = False
+            export_mgr.execute(stl_opts)
+
+            # Export QR modules: hide placard bodies, show QR bodies
+            for b in other_bodies:
+                b.isVisible = False
+            for b in qr_bodies:
+                b.isVisible = True
+
+            qr_path = os.path.join(output_folder, 'qr_modules.stl')
+            stl_opts2 = export_mgr.createSTLExportOptions(root_comp, qr_path)
+            stl_opts2.sendToPrintUtility = False
+            export_mgr.execute(stl_opts2)
+
+            # Restore all bodies visible
+            for b in qr_bodies:
+                b.isVisible = True
+            for b in other_bodies:
+                b.isVisible = True
+
+            ui.messageBox(
+                f'Exported successfully!\n\n'
+                f'  placard.stl\n'
+                f'  qr_modules.stl\n\n'
+                f'Saved to: {output_folder}\n\n'
+                f'In Bambu Studio:\n'
+                f'1. File > Import\n'
+                f'2. Select BOTH files at once (Ctrl+click)\n'
+                f'3. "Load as single object with multiple parts?" → Yes\n'
+                f'4. "Scale to millimeters?" → Yes\n'
+                f'5. Right-click each part → assign filament color'
+            )
+
+            # Connect execute to immediately run (no dialog needed)
+            on_exec = ExportExecuteHandler()
+            args.command.execute.add(on_exec)
+            _handlers.append(on_exec)
+
+        except Exception:
+            app = adsk.core.Application.get()
+            app.userInterface.messageBox(f'Export failed:\n{traceback.format_exc()}')
+
+
+class ExportExecuteHandler(adsk.core.CommandEventHandler):
+    def notify(self, args):
+        pass  # Export already done in CommandCreated
 
 
 def _find_input(inputs, input_id):
