@@ -236,45 +236,60 @@ def extrude_profiles_combined(component, sketch, depth_cm, body_name='QR_Modules
     if not valid_indices:
         return None
 
-    target_body = None
-
-    for idx, prof_idx in enumerate(valid_indices):
+    # Extrude all profiles as individual new bodies
+    all_bodies = []
+    for prof_idx in valid_indices:
         prof = profiles.item(prof_idx)
         try:
-            if target_body is None:
-                # First profile: create as new body
-                ext_input = extrudes.createInput(
-                    prof, adsk.fusion.FeatureOperations.NewBodyFeatureOperation
-                )
-                ext_input.setDistanceExtent(False, distance)
-                feat = extrudes.add(ext_input)
-                if feat and feat.bodies.count > 0:
-                    target_body = feat.bodies.item(0)
-            else:
-                # Subsequent profiles: join into existing body
-                ext_input = extrudes.createInput(
-                    prof, adsk.fusion.FeatureOperations.JoinFeatureOperation
-                )
-                ext_input.setDistanceExtent(False, distance)
-                ext_input.participantBodies = [target_body]
-                extrudes.add(ext_input)
+            ext_input = extrudes.createInput(
+                prof, adsk.fusion.FeatureOperations.NewBodyFeatureOperation
+            )
+            ext_input.setDistanceExtent(False, distance)
+            feat = extrudes.add(ext_input)
+            if feat and feat.bodies.count > 0:
+                all_bodies.append(feat.bodies.item(0))
         except Exception:
-            # If join fails for this profile, try as new body
-            try:
-                ext_input = extrudes.createInput(
-                    prof, adsk.fusion.FeatureOperations.NewBodyFeatureOperation
-                )
-                ext_input.setDistanceExtent(False, distance)
-                feat = extrudes.add(ext_input)
-                if feat and feat.bodies.count > 0:
-                    if target_body is None:
-                        target_body = feat.bodies.item(0)
-                    # else: orphan body, can't join it
-            except Exception:
-                pass
+            pass
 
-    if target_body:
-        target_body.name = body_name
+    if not all_bodies:
+        return None
+
+    if len(all_bodies) == 1:
+        all_bodies[0].name = body_name
+        return all_bodies[0]
+
+    # Combine in batches of 50 to avoid overwhelming Fusion
+    target_body = all_bodies[0]
+    remaining = all_bodies[1:]
+    batch_size = 50
+
+    while remaining:
+        batch = remaining[:batch_size]
+        remaining = remaining[batch_size:]
+
+        tool_col = adsk.core.ObjectCollection.create()
+        for b in batch:
+            tool_col.add(b)
+
+        try:
+            ci = component.features.combineFeatures.createInput(target_body, tool_col)
+            ci.operation = adsk.fusion.FeatureOperations.JoinFeatureOperation
+            ci.isKeepToolBodies = False
+            component.features.combineFeatures.add(ci)
+        except Exception:
+            # If batch combine fails, try one at a time
+            for b in batch:
+                try:
+                    tc = adsk.core.ObjectCollection.create()
+                    tc.add(b)
+                    ci = component.features.combineFeatures.createInput(target_body, tc)
+                    ci.operation = adsk.fusion.FeatureOperations.JoinFeatureOperation
+                    ci.isKeepToolBodies = False
+                    component.features.combineFeatures.add(ci)
+                except Exception:
+                    pass
+
+    target_body.name = body_name
     return target_body
 
 
