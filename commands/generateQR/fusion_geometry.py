@@ -421,7 +421,7 @@ def measure_face_bounds(face):
 
 def cut_and_fill_on_face(component, target_face, target_body, module_positions,
                          total_rows, total_size_cm, seg_size_cm, spacing_cm,
-                         depth_cm, style, frame_on, frame_size_cm,
+                         cut_depth_cm, fill_height_cm, style, frame_on, frame_size_cm,
                          icon_sketch_fn=None, auto_cut=True):
     """Generate QR code directly on an existing face with cut recess + fill.
 
@@ -437,7 +437,9 @@ def cut_and_fill_on_face(component, target_face, target_body, module_positions,
         total_size_cm: Total QR size in cm (before auto-scaling).
         seg_size_cm: Module size in cm (before auto-scaling).
         spacing_cm: Gap between modules in cm (before auto-scaling).
-        depth_cm: Cut/fill depth in cm.
+        cut_depth_cm: How deep to cut from the face (cm).
+        fill_height_cm: How tall the fill bodies are (cm). Can be larger
+            than cut_depth_cm to account for existing recesses.
         style: 'Square' or 'Circle'.
         frame_on: Whether to add frame.
         frame_size_cm: Frame width in cm (before auto-scaling).
@@ -520,7 +522,7 @@ def cut_and_fill_on_face(component, target_face, target_body, module_positions,
         cut_input = extrudes.createInput(
             cut_prof, adsk.fusion.FeatureOperations.CutFeatureOperation
         )
-        cut_dist = adsk.core.ValueInput.createByReal(depth_cm)
+        cut_dist = adsk.core.ValueInput.createByReal(cut_depth_cm)
         cut_input.setDistanceExtent(False, cut_dist)
         cut_input.participantBodies = [target_body]
         extrudes.add(cut_input)
@@ -535,7 +537,7 @@ def cut_and_fill_on_face(component, target_face, target_body, module_positions,
                      seg_size_cm, spacing_cm, style, offset_x, offset_y, flip_y=False)
 
     # Extrude downward (negative depth) to fill into the pocket
-    neg_depth = adsk.core.ValueInput.createByReal(-depth_cm)
+    neg_depth = adsk.core.ValueInput.createByReal(-fill_height_cm)
     fill_profiles = adsk.core.ObjectCollection.create()
     for i in range(fill_sketch.profiles.count):
         fill_profiles.add(fill_sketch.profiles.item(i))
@@ -633,7 +635,7 @@ def cut_and_fill_on_face(component, target_face, target_body, module_positions,
             icon_sketch_fn(icon_sketch)
 
         icon_body = extrude_profiles_combined(
-            component, icon_sketch, depth_cm, 'QR_Icon', True
+            component, icon_sketch, fill_height_cm, 'QR_Icon', True
         )
         result['icon_body'] = icon_body
 

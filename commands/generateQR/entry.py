@@ -201,8 +201,10 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
             _add_hidden(sc.addValueInput('frame_size', 'Frame Size', 'mm',
                                          adsk.core.ValueInput.createByReal(fusion_geometry.mm_to_cm(config.DEFAULT_FRAME_SIZE_MM))))
 
-            sc.addValueInput('extrude_distance', 'Depth / Height', 'mm',
-                             adsk.core.ValueInput.createByReal(fusion_geometry.mm_to_cm(config.DEFAULT_EXTRUDE_DISTANCE_MM)))
+            sc.addValueInput('cut_depth', 'Cut Depth', 'mm',
+                             adsk.core.ValueInput.createByReal(fusion_geometry.mm_to_cm(0.20)))
+            sc.addValueInput('fill_height', 'Fill Height', 'mm',
+                             adsk.core.ValueInput.createByReal(fusion_geometry.mm_to_cm(0.30)))
 
             icon_dd = sc.addDropDownCommandInput(
                 'icon_select', 'Icon', adsk.core.DropDownStyles.TextListDropDownStyle)
@@ -495,8 +497,12 @@ class ValidateInputsHandler(adsk.core.ValidateInputsEventHandler):
                 args.areInputsValid = False
                 return
 
-            ext_d = _find_input(inputs, 'extrude_distance')
-            if ext_d and ext_d.value <= 0:
+            cut_d = _find_input(inputs, 'cut_depth')
+            if cut_d and cut_d.value <= 0:
+                args.areInputsValid = False
+                return
+            fill_h = _find_input(inputs, 'fill_height')
+            if fill_h and fill_h.value <= 0:
                 args.areInputsValid = False
                 return
 
@@ -545,7 +551,8 @@ class ExecuteHandler(adsk.core.CommandEventHandler):
             frame_on = frame_inp.value if frame_inp else False
             frame_size_cm = _find_input(inputs, 'frame_size').value if frame_on else 0
 
-            extrude_cm = _find_input(inputs, 'extrude_distance').value
+            cut_depth_cm = _find_input(inputs, 'cut_depth').value
+            fill_height_cm = _find_input(inputs, 'fill_height').value
 
             # Placement mode
             place_inp = _find_input(inputs, 'placement_mode')
@@ -672,8 +679,8 @@ class ExecuteHandler(adsk.core.CommandEventHandler):
                         fusion_geometry.cut_and_fill_on_face(
                             target_comp, target_face, target_body,
                             module_positions, total_rows, total_size_cm,
-                            seg_size_cm, spacing_cm, extrude_cm, style,
-                            frame_on, frame_size_cm, icon_sketch_fn, auto_cut
+                            seg_size_cm, spacing_cm, cut_depth_cm, fill_height_cm,
+                            style, frame_on, frame_size_cm, icon_sketch_fn, auto_cut
                         )
                     except Exception:
                         ui.messageBox(f'Place on Face failed:\n{traceback.format_exc()}')
@@ -711,7 +718,7 @@ class ExecuteHandler(adsk.core.CommandEventHandler):
                         bp_p1 = adsk.core.Point3D.create(0, 0, 0)
                         bp_p2 = adsk.core.Point3D.create(total_size_cm, total_size_cm, 0)
                     bp_sketch.sketchCurves.sketchLines.addTwoPointRectangle(bp_p1, bp_p2)
-                    base_depth_cm = extrude_cm * 0.5
+                    base_depth_cm = fill_height_cm * 0.5
                     bp_prof = bp_sketch.profiles.item(0)
                     bp_ext = comp.features.extrudeFeatures.createInput(
                         bp_prof, adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
@@ -727,7 +734,7 @@ class ExecuteHandler(adsk.core.CommandEventHandler):
                         fs = comp.sketches.add(comp.xYConstructionPlane)
                         fs.name = 'QR_Frame_Sketch'
                         fusion_geometry.draw_frame(fs, total_size_cm, frame_size_cm)
-                        fusion_geometry.extrude_frame_profile(comp, fs, extrude_cm)
+                        fusion_geometry.extrude_frame_profile(comp, fs, fill_height_cm)
 
                     pd.progressValue = idx * 100 + 20
 
@@ -739,7 +746,7 @@ class ExecuteHandler(adsk.core.CommandEventHandler):
                     pd.progressValue = idx * 100 + 50
 
                     pd.message = f'Extruding QR code {idx + 1}...'
-                    fusion_geometry.extrude_profiles_combined(comp, ms, extrude_cm, 'QR_Modules', False)
+                    fusion_geometry.extrude_profiles_combined(comp, ms, fill_height_cm, 'QR_Modules', False)
 
                     pd.progressValue = idx * 100 + 80
 
@@ -748,7 +755,7 @@ class ExecuteHandler(adsk.core.CommandEventHandler):
                         isk = comp.sketches.add(comp.xYConstructionPlane)
                         isk.name = 'QR_Icon_Sketch'
                         icon_sketch_fn(isk)
-                        fusion_geometry.extrude_profiles_combined(comp, isk, extrude_cm, 'QR_Icon', True)
+                        fusion_geometry.extrude_profiles_combined(comp, isk, fill_height_cm, 'QR_Icon', True)
 
                 pd.progressValue = idx * 100 + 100
 
