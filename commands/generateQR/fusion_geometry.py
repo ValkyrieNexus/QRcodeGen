@@ -201,11 +201,11 @@ def extrude_all_profiles(component, sketch, depth_cm, body_prefix='QR_Module',
 
 def extrude_profiles_combined(component, sketch, depth_cm, body_name='QR_Modules',
                               exclude_largest=False):
-    """Extrude all profiles into a single body using incremental join.
+    """Extrude all profiles into a single body using TemporaryBRepManager.
 
-    Extrudes the first profile as NewBody, then each subsequent profile
-    uses JoinFeatureOperation to merge into the first body. This builds
-    one clean body without needing a separate combine step.
+    Creates temporary BRep bodies for each profile, unions them all in
+    memory, then adds the single result to the component. This avoids
+    the unreliable CombineFeature and produces clean geometry.
 
     Args:
         component: adsk.fusion.Component
@@ -218,7 +218,6 @@ def extrude_profiles_combined(component, sketch, depth_cm, body_name='QR_Modules
         adsk.fusion.BRepBody or None: The single body.
     """
     profiles = sketch.profiles
-    extrudes = component.features.extrudeFeatures
     distance = adsk.core.ValueInput.createByReal(depth_cm)
 
     # Find largest profile to exclude (background)
@@ -231,66 +230,82 @@ def extrude_profiles_combined(component, sketch, depth_cm, body_name='QR_Modules
                 largest_area = area
                 largest_idx = i
 
-    # Collect valid profile indices
     valid_indices = [i for i in range(profiles.count) if i != largest_idx]
     if not valid_indices:
         return None
 
-    # Extrude all profiles as individual new bodies
-    all_bodies = []
+    # Use TemporaryBRepManager to build one body in memory
+    temp_brep = adsk.fusion.TemporaryBRepManager.get()
+
+    # Get the sketch plane normal and transform for extrusion direction
+    # We need to create temporary extrusion bodies
+    merged_body = None
+
     for prof_idx in valid_indices:
         prof = profiles.item(prof_idx)
         try:
-            ext_input = extrudes.createInput(
-                prof, adsk.fusion.FeatureOperations.NewBodyFeatureOperation
-            )
-            ext_input.setDistanceExtent(False, distance)
-            feat = extrudes.add(ext_input)
-            if feat and feat.bodies.count > 0:
-                all_bodies.append(feat.bodies.item(0))
+            # Create a temporary wire body from profile loops, then extrude
+            # Use the profile's area properties to get the outer loop
+            for loop_idx in range(prof.profileLoops.count):
+                loop = prof.profileLoops.item(loop_idx)
+                if not loop.isOuter:
+                    continue
+
+                # Get all curves from the loop
+                curves = adsk.core.ObjectCollection.create()
+                for edge_idx in range(loop.profileCurves.count):
+                    curves.add(loop.profileCurves.item(edge_idx).sketchEntity)
+
+                # Create wire body from curves
+                wire, _ = temp_brep.createWireFromCurves(curves)
+                if wire:
+                    # Extrude the wire into a solid
+                    # Direction vector based on depth sign
+                    normal = sketch.referencePlane.geometry.normal
+                    direction = adsk.core.Vector3D.create(
+                        normal.x * depth_cm,
+                        normal.y * depth_cm,
+                        normal.z * depth_cm
+                    )
+                    extruded = temp_brep.createSolidFromPlanarWires([wire], direction)
+                    if extruded:
+                        if merged_body is None:
+                            merged_body = extruded
+                        else:
+                            temp_brep.booleanOperation(
+                                merged_body, extruded,
+                                adsk.fusion.BooleanTypes.UnionBooleanType
+                            )
         except Exception:
             pass
 
-    if not all_bodies:
+    if merged_body is None:
+        # Fallback: extrude first profile as NewBody
+        if valid_indices:
+            try:
+                extrudes = component.features.extrudeFeatures
+                ext_input = extrudes.createInput(
+                    profiles.item(valid_indices[0]),
+                    adsk.fusion.FeatureOperations.NewBodyFeatureOperation
+                )
+                ext_input.setDistanceExtent(False, distance)
+                feat = extrudes.add(ext_input)
+                if feat and feat.bodies.count > 0:
+                    feat.bodies.item(0).name = body_name
+                    return feat.bodies.item(0)
+            except Exception:
+                pass
         return None
 
-    if len(all_bodies) == 1:
-        all_bodies[0].name = body_name
-        return all_bodies[0]
+    # Add the merged temporary body to the component
+    base_feat = component.features.baseFeatures.add()
+    base_feat.startEdit()
+    result_body = component.bRepBodies.add(merged_body, base_feat)
+    base_feat.finishEdit()
 
-    # Combine in batches of 50 to avoid overwhelming Fusion
-    target_body = all_bodies[0]
-    remaining = all_bodies[1:]
-    batch_size = 50
-
-    while remaining:
-        batch = remaining[:batch_size]
-        remaining = remaining[batch_size:]
-
-        tool_col = adsk.core.ObjectCollection.create()
-        for b in batch:
-            tool_col.add(b)
-
-        try:
-            ci = component.features.combineFeatures.createInput(target_body, tool_col)
-            ci.operation = adsk.fusion.FeatureOperations.JoinFeatureOperation
-            ci.isKeepToolBodies = False
-            component.features.combineFeatures.add(ci)
-        except Exception:
-            # If batch combine fails, try one at a time
-            for b in batch:
-                try:
-                    tc = adsk.core.ObjectCollection.create()
-                    tc.add(b)
-                    ci = component.features.combineFeatures.createInput(target_body, tc)
-                    ci.operation = adsk.fusion.FeatureOperations.JoinFeatureOperation
-                    ci.isKeepToolBodies = False
-                    component.features.combineFeatures.add(ci)
-                except Exception:
-                    pass
-
-    target_body.name = body_name
-    return target_body
+    if result_body:
+        result_body.name = body_name
+    return result_body
 
 
 def extrude_frame_profile(component, sketch, depth_cm):
