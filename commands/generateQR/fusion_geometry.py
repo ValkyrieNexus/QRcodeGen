@@ -201,21 +201,21 @@ def extrude_all_profiles(component, sketch, depth_cm, body_prefix='QR_Module',
 
 def extrude_profiles_combined(component, sketch, depth_cm, body_name='QR_Modules',
                               exclude_largest=False):
-    """Extrude all profiles and combine into a single body.
+    """Extrude all profiles into a single body using incremental join.
 
-    Collects all valid profiles into an ObjectCollection, extrudes them
-    in one operation, then uses CombineFeature to union all resulting
-    bodies into one named body.
+    Extrudes the first profile as NewBody, then each subsequent profile
+    uses JoinFeatureOperation to merge into the first body. This builds
+    one clean body without needing a separate combine step.
 
     Args:
         component: adsk.fusion.Component
         sketch: adsk.fusion.Sketch
-        depth_cm: Extrusion depth in cm.
-        body_name: Name for the final combined body.
+        depth_cm: Extrusion depth in cm (negative = downward).
+        body_name: Name for the final body.
         exclude_largest: If True, skip the largest profile (background).
 
     Returns:
-        adsk.fusion.BRepBody or None: The single combined body.
+        adsk.fusion.BRepBody or None: The single body.
     """
     profiles = sketch.profiles
     extrudes = component.features.extrudeFeatures
@@ -231,84 +231,50 @@ def extrude_profiles_combined(component, sketch, depth_cm, body_name='QR_Modules
                 largest_area = area
                 largest_idx = i
 
-    # Collect valid profiles into ObjectCollection
-    prof_collection = adsk.core.ObjectCollection.create()
-    for i in range(profiles.count):
-        if i == largest_idx:
-            continue
-        prof_collection.add(profiles.item(i))
-
-    if prof_collection.count == 0:
+    # Collect valid profile indices
+    valid_indices = [i for i in range(profiles.count) if i != largest_idx]
+    if not valid_indices:
         return None
 
-    # Single extrude operation for all profiles at once
-    try:
-        ext_input = extrudes.createInput(
-            prof_collection,
-            adsk.fusion.FeatureOperations.NewBodyFeatureOperation
-        )
-        ext_input.setDistanceExtent(False, distance)
-        feat = extrudes.add(ext_input)
-    except Exception:
-        # If batch extrude fails, fall back to individual extrusions
-        app = adsk.core.Application.get()
-        app.log(f'QRcodeGen: Batch extrude failed for {prof_collection.count} profiles, falling back to individual')
-        bodies = []
-        for i in range(prof_collection.count):
-            try:
-                single_input = extrudes.createInput(
-                    prof_collection.item(i),
-                    adsk.fusion.FeatureOperations.NewBodyFeatureOperation
+    target_body = None
+
+    for idx, prof_idx in enumerate(valid_indices):
+        prof = profiles.item(prof_idx)
+        try:
+            if target_body is None:
+                # First profile: create as new body
+                ext_input = extrudes.createInput(
+                    prof, adsk.fusion.FeatureOperations.NewBodyFeatureOperation
                 )
-                single_input.setDistanceExtent(False, distance)
-                f = extrudes.add(single_input)
-                if f and f.bodies.count > 0:
-                    bodies.append(f.bodies.item(0))
-            except Exception:
-                pass
-        if not bodies:
-            return None
-        target = bodies[0]
-        if len(bodies) > 1:
-            tool_col = adsk.core.ObjectCollection.create()
-            for b in bodies[1:]:
-                tool_col.add(b)
+                ext_input.setDistanceExtent(False, distance)
+                feat = extrudes.add(ext_input)
+                if feat and feat.bodies.count > 0:
+                    target_body = feat.bodies.item(0)
+            else:
+                # Subsequent profiles: join into existing body
+                ext_input = extrudes.createInput(
+                    prof, adsk.fusion.FeatureOperations.JoinFeatureOperation
+                )
+                ext_input.setDistanceExtent(False, distance)
+                ext_input.participantBodies = [target_body]
+                extrudes.add(ext_input)
+        except Exception:
+            # If join fails for this profile, try as new body
             try:
-                ci = component.features.combineFeatures.createInput(target, tool_col)
-                ci.operation = adsk.fusion.FeatureOperations.JoinFeatureOperation
-                ci.isKeepToolBodies = False
-                component.features.combineFeatures.add(ci)
+                ext_input = extrudes.createInput(
+                    prof, adsk.fusion.FeatureOperations.NewBodyFeatureOperation
+                )
+                ext_input.setDistanceExtent(False, distance)
+                feat = extrudes.add(ext_input)
+                if feat and feat.bodies.count > 0:
+                    if target_body is None:
+                        target_body = feat.bodies.item(0)
+                    # else: orphan body, can't join it
             except Exception:
                 pass
-        target.name = body_name
-        return target
 
-    if not feat or feat.bodies.count == 0:
-        return None
-
-    # If only one body resulted, just name it and return
-    if feat.bodies.count == 1:
-        feat.bodies.item(0).name = body_name
-        return feat.bodies.item(0)
-
-    # Combine all bodies into one using CombineFeature
-    target_body = feat.bodies.item(0)
-    tool_bodies = adsk.core.ObjectCollection.create()
-    for i in range(1, feat.bodies.count):
-        tool_bodies.add(feat.bodies.item(i))
-
-    try:
-        combine_input = component.features.combineFeatures.createInput(
-            target_body, tool_bodies
-        )
-        combine_input.operation = adsk.fusion.FeatureOperations.JoinFeatureOperation
-        combine_input.isKeepToolBodies = False
-        component.features.combineFeatures.add(combine_input)
-    except Exception:
-        # If combine fails (coincident faces), leave as separate bodies
-        pass
-
-    target_body.name = body_name
+    if target_body:
+        target_body.name = body_name
     return target_body
 
 
@@ -527,99 +493,26 @@ def cut_and_fill_on_face(component, target_face, target_body, module_positions,
         cut_input.participantBodies = [target_body]
         extrudes.add(cut_input)
 
-    # ── 2. Fill module pockets with new bodies ──
-    # The big cut already created the pocket. Now extrude module shapes
-    # DOWNWARD (negative direction) from the surface plane into the pocket.
-    # This creates bodies that are flush with the original surface.
+    # ── 2. Fill module pockets ──
+    # Extrude modules downward into the pocket using incremental join.
+    # Each profile joins into one body, producing a single QR_Modules body.
     fill_sketch = component.sketches.add(ref_plane)
     fill_sketch.name = 'QR_Modules_Fill'
     draw_all_modules(fill_sketch, module_positions, total_rows,
                      seg_size_cm, spacing_cm, style, offset_x, offset_y, flip_y=False)
 
-    # Extrude downward (negative depth) to fill into the pocket
-    neg_depth = adsk.core.ValueInput.createByReal(-fill_height_cm)
-    fill_profiles = adsk.core.ObjectCollection.create()
-    for i in range(fill_sketch.profiles.count):
-        fill_profiles.add(fill_sketch.profiles.item(i))
+    modules_body = extrude_profiles_combined(
+        component, fill_sketch, -fill_height_cm, 'QR_Modules', False
+    )
+    result['modules_body'] = modules_body
 
-    if fill_profiles.count > 0:
-        try:
-            fill_input = extrudes.createInput(
-                fill_profiles, adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
-            fill_input.setDistanceExtent(False, neg_depth)
-            fill_feat = extrudes.add(fill_input)
-
-            if fill_feat and fill_feat.bodies.count > 0:
-                # Combine all module bodies into one
-                if fill_feat.bodies.count == 1:
-                    fill_feat.bodies.item(0).name = 'QR_Modules'
-                    result['modules_body'] = fill_feat.bodies.item(0)
-                else:
-                    target = fill_feat.bodies.item(0)
-                    tool_col = adsk.core.ObjectCollection.create()
-                    for bi in range(1, fill_feat.bodies.count):
-                        tool_col.add(fill_feat.bodies.item(bi))
-                    try:
-                        ci = component.features.combineFeatures.createInput(target, tool_col)
-                        ci.operation = adsk.fusion.FeatureOperations.JoinFeatureOperation
-                        ci.isKeepToolBodies = False
-                        component.features.combineFeatures.add(ci)
-                    except Exception:
-                        pass
-                    target.name = 'QR_Modules'
-                    result['modules_body'] = target
-        except Exception:
-            # Fallback: try individual extrusions
-            bodies = []
-            for i in range(fill_profiles.count):
-                try:
-                    si = extrudes.createInput(
-                        fill_profiles.item(i), adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
-                    si.setDistanceExtent(False, neg_depth)
-                    sf = extrudes.add(si)
-                    if sf and sf.bodies.count > 0:
-                        bodies.append(sf.bodies.item(0))
-                except Exception:
-                    pass
-            if bodies:
-                target = bodies[0]
-                if len(bodies) > 1:
-                    tool_col = adsk.core.ObjectCollection.create()
-                    for b in bodies[1:]:
-                        tool_col.add(b)
-                    try:
-                        ci = component.features.combineFeatures.createInput(target, tool_col)
-                        ci.operation = adsk.fusion.FeatureOperations.JoinFeatureOperation
-                        ci.isKeepToolBodies = False
-                        component.features.combineFeatures.add(ci)
-                    except Exception:
-                        pass
-                target.name = 'QR_Modules'
-                result['modules_body'] = target
-
-    # ── 3. Frame (if enabled) -- fill into pocket, flush with surface ──
+    # ── 3. Frame (if enabled) ──
     if frame_on:
         frame_fill_sketch = component.sketches.add(ref_plane)
         frame_fill_sketch.name = 'QR_Frame_Fill'
         draw_frame(frame_fill_sketch, total_size_cm, frame_size_cm, offset_x, offset_y)
-
-        # Find the frame ring profile (smaller area) and extrude downward
-        if frame_fill_sketch.profiles.count >= 2:
-            areas = []
-            for i in range(frame_fill_sketch.profiles.count):
-                areas.append((frame_fill_sketch.profiles.item(i).areaProperties().area, i))
-            areas.sort()
-            frame_prof = frame_fill_sketch.profiles.item(areas[0][1])
-            try:
-                ff_input = extrudes.createInput(
-                    frame_prof, adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
-                ff_input.setDistanceExtent(False, neg_depth)
-                ff_feat = extrudes.add(ff_input)
-                if ff_feat and ff_feat.bodies.count > 0:
-                    ff_feat.bodies.item(0).name = 'QR_Frame'
-                    result['frame_body'] = ff_feat.bodies.item(0)
-            except Exception:
-                pass
+        frame_body = extrude_frame_profile(component, frame_fill_sketch, -fill_height_cm)
+        result['frame_body'] = frame_body
 
     # ── 4. Icon (if provided) ──
     if icon_sketch_fn:
