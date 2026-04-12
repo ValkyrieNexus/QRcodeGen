@@ -97,15 +97,45 @@ For best results with logos, use the **Empty Center** option:
 
 This gives you full control over logo orientation and positioning.
 
-### Multi-Color 3D Printing Workflow
+### Multi-Color 3D Printing with Bambu Studio
 
-1. Generate the QR code (Standalone or Place on Face)
-2. Export as **3MF** format (File > Export or right-click component > Save As Mesh)
-3. Import into your slicer (Bambu Studio, PrusaSlicer, etc.)
-4. Assign filament colors to each body:
-   - Base plate / background → white or light color
-   - Frame + Modules → black or dark color
-   - Icon / Logo → your choice
+Fusion's 3MF export does not support multi-color filament assignment for Bambu Studio. Use the built-in **Export QR for Bambu** command instead:
+
+#### Step 1: Generate the QR Code
+
+1. Use **Place on Face** mode to generate the QR code on your design
+2. Configure Cut Depth and Fill Height as needed
+
+#### Step 2: Export for Bambu
+
+1. Click **Export QR for Bambu** in the CREATE panel (next to QR Code Creator)
+2. Select an output folder
+3. The addon exports two STL files:
+   - `placard.stl` — your design body (the background/base)
+   - `qr_modules.stl` — all QR module bodies (the dark squares)
+
+#### Step 3: Import into Bambu Studio
+
+1. Open Bambu Studio
+2. **File > Import** (or Ctrl+I)
+3. Navigate to the folder where you saved the STLs
+4. **Select BOTH files at once** (hold Ctrl and click both `placard.stl` and `qr_modules.stl`)
+5. Click Open
+6. Bambu Studio will ask: **"Do you want to load these files as one single object with multiple parts?"** → Click **Yes**
+7. If asked about scaling to millimeters → Click **Yes**
+
+#### Step 4: Assign Colors
+
+1. In the left sidebar, expand the object to see both parts
+2. Right-click the placard part → assign your background filament (e.g., white)
+3. Right-click the QR modules part → assign your QR color filament (e.g., black)
+4. Slice and print!
+
+> **Note:** The two STL files share the same coordinate origin from Fusion, so they will align perfectly when imported together.
+
+### Multi-Color with Other Slicers
+
+For PrusaSlicer or other slicers that support multi-part objects, the same two-STL workflow applies. Import both files and use your slicer's multi-material/multi-part features to assign different filaments.
 
 ## Creation Modes
 
