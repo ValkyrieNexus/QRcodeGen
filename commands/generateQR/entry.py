@@ -399,11 +399,16 @@ def _update_visibility(inputs):
     for fid in _ALL_MODE_IDS:
         _set_visible(inputs, fid, fid in active_ids)
 
-    # Placement mode: show face selection only in Place on Face mode
+    # Placement mode visibility
     place_inp = _find_input(inputs, 'placement_mode')
-    is_on_face = place_inp and place_inp.selectedItem and place_inp.selectedItem.name == config.PLACEMENT_ON_FACE
+    placement_name = place_inp.selectedItem.name if place_inp and place_inp.selectedItem else config.PLACEMENT_STANDALONE
+    is_on_face = placement_name == config.PLACEMENT_ON_FACE
+    is_svg = placement_name == config.PLACEMENT_SVG_EXPORT
     _set_visible(inputs, 'target_face', is_on_face)
     _set_visible(inputs, 'auto_cut', is_on_face)
+    # Hide cut/fill depth fields for SVG export (not needed)
+    _set_visible(inputs, 'cut_depth', not is_svg)
+    _set_visible(inputs, 'fill_height', not is_svg)
 
     # Frame size: visible only when Frame is checked
     frame_inp = _find_input(inputs, 'frame_enabled')
@@ -714,6 +719,48 @@ class ExecuteHandler(adsk.core.CommandEventHandler):
 
             if not data_list:
                 ui.messageBox('No data to encode.')
+                return
+
+            # ════════════════════════════════════════════
+            #  SVG EXPORT: save SVG file and return
+            # ════════════════════════════════════════════
+            if placement == config.PLACEMENT_SVG_EXPORT:
+                border = 1 if frame_on else 4
+                for idx, data in enumerate(data_list):
+                    matrix = qr_logic.generate_matrix(data, ec_str, border)
+
+                    # Clear center for icon
+                    icon_zone = None
+                    if icon_name != 'No Icon':
+                        zone_modules = qr_logic.compute_icon_zone_modules(matrix, 20)
+                        icon_zone = qr_logic.clear_center_zone(matrix, zone_modules)
+
+                    seg_mm = _find_input(inputs, 'segment_size').value * 10.0
+                    spacing_mm = _find_input(inputs, 'segment_spacing').value * 10.0
+                    frame_mm = _find_input(inputs, 'frame_size').value * 10.0 if frame_on else 0
+
+                    svg_content = qr_logic.generate_svg(
+                        matrix, seg_mm, border, frame_on, frame_mm,
+                        icon_zone, style, spacing_mm
+                    )
+
+                    # Save dialog
+                    dlg = ui.createFileDialog()
+                    dlg.title = 'Save QR Code SVG'
+                    dlg.filter = 'SVG files (*.svg)'
+                    if len(data_list) > 1:
+                        dlg.initialFilename = f'qr_code_{idx + 1}.svg'
+                    else:
+                        dlg.initialFilename = 'qr_code.svg'
+
+                    if dlg.showSave() == adsk.core.DialogResults.DialogOK:
+                        with open(dlg.filename, 'w', encoding='utf-8') as f:
+                            f.write(svg_content)
+                        ui.messageBox(
+                            f'SVG saved to:\n{dlg.filename}\n\n'
+                            f'In Fusion: Insert > Insert SVG\n'
+                            f'Select a face, import the SVG, then extrude as needed.'
+                        )
                 return
 
             # Progress dialog

@@ -199,6 +199,62 @@ def generate_sequence_data(template, start, end, leading_zeros=0):
     return results
 
 
+def generate_svg(matrix, module_size_mm=2.0, border=4, frame_on=False,
+                  frame_size_mm=2.0, icon_zone=None, style='Square',
+                  spacing_mm=0.0):
+    """Generate an SVG string from a QR matrix.
+
+    Args:
+        matrix: 2D boolean list from generate_matrix().
+        module_size_mm: Size of each module in mm.
+        border: Already included in matrix (from generate_matrix).
+        frame_on: Whether to add a frame border.
+        frame_size_mm: Frame width in mm.
+        icon_zone: Tuple (start, start, end, end) of cleared center zone, or None.
+        style: 'Square' or 'Circle'.
+        spacing_mm: Gap between modules in mm.
+
+    Returns:
+        str: SVG content as a string.
+    """
+    n = len(matrix)
+    total_mm = n * module_size_mm
+    frame = frame_size_mm if frame_on else 0
+    canvas = total_mm + 2 * frame
+    half_gap = spacing_mm / 2.0
+
+    lines = [
+        f'<?xml version="1.0" encoding="UTF-8"?>',
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {canvas} {canvas}" width="{canvas}mm" height="{canvas}mm">',
+    ]
+
+    # White background
+    lines.append(f'  <rect width="{canvas}" height="{canvas}" fill="white"/>')
+
+    # Frame border
+    if frame_on:
+        lines.append(f'  <rect x="0" y="0" width="{canvas}" height="{canvas}" fill="black"/>')
+        lines.append(f'  <rect x="{frame}" y="{frame}" width="{total_mm}" height="{total_mm}" fill="white"/>')
+
+    # QR modules
+    for r, row in enumerate(matrix):
+        for c, val in enumerate(row):
+            if val:
+                x = frame + c * module_size_mm + half_gap
+                y = frame + r * module_size_mm + half_gap
+                size = module_size_mm - spacing_mm
+                if style == 'Circle':
+                    cx = x + size / 2.0
+                    cy = y + size / 2.0
+                    radius = size / 2.0
+                    lines.append(f'  <circle cx="{cx}" cy="{cy}" r="{radius}" fill="black"/>')
+                else:
+                    lines.append(f'  <rect x="{x}" y="{y}" width="{size}" height="{size}" fill="black"/>')
+
+    lines.append('</svg>')
+    return '\n'.join(lines)
+
+
 def estimate_qr_version(data, ec_level='H'):
     """Estimate the QR version that will be used for the given data.
 
