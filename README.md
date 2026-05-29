@@ -174,7 +174,3 @@ QRcodeGen/
 ## License
 
 This project is open source. The bundled `qrcode` library is licensed under the MIT License.
-
-## Credits
-
-Built with [Claude Code](https://claude.com/claude-code).
