@@ -4,16 +4,16 @@ A free, open-source addon for Autodesk Fusion (formerly Fusion 360) that generat
 
 ## Features
 
-- **Creation Modes**: Simple text, Website URL, vCard (contact info), WiFi credentials, Sequence (batch numbered QR codes)
-- **Placement Modes**:
-  - **Standalone** — generates a freestanding QR code component with base plate, frame, and modules
-  - **Place on Face** — select a face on an existing body, and the QR code is generated directly on it with automatic scaling and centering. Cuts a recess and fills with colored bodies for multi-color printing
-- **Styles**: Square or Circle (dot) modules
-- **Configurable**: Segment size, segment spacing, frame border, extrude depth/height, error correction level (L/M/Q/H)
-- **Center Logo**: Built-in icons, custom SVG import, or "Empty Center" (clears center zone so you can place your own logo manually)
-- **Combined Bodies**: All QR modules are combined into a single `QR_Modules` body instead of hundreds of individual bodies — clean body tree, easy to move and assign colors
-- **Multi-Color Ready**: Separate bodies for base plate, frame, modules, and icon — assign different filament colors in your slicer (Bambu Studio, PrusaSlicer, etc.)
-- **No External Dependencies**: Pure-Python QR code library bundled — no pip install needed
+- Creation modes: Simple text, Website URL, vCard (contact info), WiFi credentials, Sequence (batch numbered QR codes)
+- Placement modes:
+  - Standalone — generates a freestanding QR code component with base plate, frame, and modules
+  - Place on Face — select a face on an existing body, and the QR code is generated directly on it with automatic scaling and centering. Cuts a recess and fills with colored bodies for multi-color printing
+- Styles: Square or Circle (dot) modules
+- Configurable: Segment size, segment spacing, frame border, extrude depth/height, error correction level (L/M/Q/H)
+- Center logo: Built-in icons, custom SVG import, or "Empty Center" (clears center zone so you can place your own logo manually)
+- Combined bodies: All QR modules are combined into a single `QR_Modules` body instead of hundreds of individual bodies — clean body tree, easy to move and assign colors
+- Multi-color ready: Separate bodies for base plate, frame, modules, and icon — assign different filament colors in your slicer (Bambu Studio, PrusaSlicer, etc.)
+- No external dependencies: Pure-Python QR code library bundled — no pip install needed
 
 ## Installation
 
@@ -29,14 +29,12 @@ git clone https://github.com/ValkyrieNexus/QRcodeGen.git
 
 Copy the entire `QRcodeGen` folder to your Fusion AddIns directory:
 
-| OS | Path |
-|----|------|
-| **Windows** | `%APPDATA%\Autodesk\Autodesk Fusion 360\API\AddIns\` |
-| **Mac** | `~/Library/Application Support/Autodesk/Autodesk Fusion 360/API/AddIns/` |
+- Windows: `%APPDATA%\Autodesk\Autodesk Fusion 360\API\AddIns\`
+- Mac: `~/Library/Application Support/Autodesk/Autodesk Fusion 360/API/AddIns/`
 
-> **Tip**: You can find this path in Fusion by going to **Utilities > Add-Ins**, clicking the green **+** button, and noting the directory it opens.
+> Tip: You can find this path in Fusion by going to **Utilities > Add-Ins**, clicking the green **+** button, and noting the directory it opens.
 
-> **Important**: Do NOT place the addon on a cloud-synced drive (OneDrive, Dropbox, etc.) as this can cause issues.
+> Important: Do NOT place the addon on a cloud-synced drive (OneDrive, Dropbox, etc.) as this can cause issues.
 
 ### Step 3: Enable in Fusion
 
@@ -56,12 +54,12 @@ A **QR Code Creator** button will appear in the **DESIGN > CREATE** panel in the
 2. Select a **Creation Mode** (Simple, Website, vCard, WiFi, or Sequence)
 3. Enter your data (URL, text, contact info, etc.)
 4. Configure style options:
-   - **Style**: Square or Circle modules
-   - **Segment Size**: Size of each QR module (default 2mm)
-   - **Frame**: Optional border frame
-   - **Depth / Height**: Extrusion depth (default 0.60mm)
-   - **Icon**: Optional center logo (built-in, custom SVG, or Empty Center)
-   - **Error Correction**: L (7%), M (15%), Q (25%), H (30%)
+   - Style: Square or Circle modules
+   - Segment Size: Size of each QR module (default 2mm)
+   - Frame: Optional border frame
+   - Depth / Height: Extrusion depth (default 0.60mm)
+   - Icon: Optional center logo (built-in, custom SVG, or Empty Center)
+   - Error Correction: L (7%), M (15%), Q (25%), H (30%)
 5. Click **OK**
 6. The QR code is generated as a component with separate bodies:
    - `QR_BasePlate` — the background (assign light/white filament)
@@ -82,8 +80,8 @@ This mode generates the QR code directly on a face of an existing body — no ma
    - Cut module-shaped recesses into the body (if "Cut recess into body" is checked)
    - Fill the recesses with new bodies for multi-color printing
 5. Toggle **Cut recess into body**:
-   - **Checked** (default): Cuts pockets into the body, then fills them with QR bodies flush with the surface
-   - **Unchecked**: Only extrudes QR bodies outward from the face (use when you've already created a recess)
+   - Checked (default): Cuts pockets into the body, then fills them with QR bodies flush with the surface
+   - Unchecked: Only extrudes QR bodies outward from the face (use when you've already created a recess)
 
 ### Adding a Center Logo
 
@@ -131,7 +129,7 @@ Fusion's 3MF export does not support multi-color filament assignment for Bambu S
 3. Right-click the QR modules part → assign your QR color filament (e.g., black)
 4. Slice and print!
 
-> **Note:** The two STL files share the same coordinate origin from Fusion, so they will align perfectly when imported together.
+> Note: The two STL files share the same coordinate origin from Fusion, so they will align perfectly when imported together.
 
 ### Multi-Color with Other Slicers
 
@@ -141,11 +139,11 @@ For PrusaSlicer or other slicers that support multi-part objects, the same two-S
 
 | Mode | Description | Example |
 |------|-------------|---------|
-| **Simple** | Free-form text | Any text string |
-| **Website** | URL with https:// prefix | `https://example.com` |
-| **vCard** | Contact card with name, phone, email, address | Business card QR |
-| **WiFi** | WiFi credentials (SSID, password, encryption) | Guest network access |
-| **Sequence** | Batch numbered QR codes using `/#/` placeholder | `Part /#/` → Part 001, Part 002, ... |
+| Simple | Free-form text | Any text string |
+| Website | URL with https:// prefix | `https://example.com` |
+| vCard | Contact card with name, phone, email, address | Business card QR |
+| WiFi | WiFi credentials (SSID, password, encryption) | Guest network access |
+| Sequence | Batch numbered QR codes using `/#/` placeholder | `Part /#/` → Part 001, Part 002, ... |
 
 ## Requirements
 
